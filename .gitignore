@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# PyInstaller output
+build/
+dist/
+*.exe
+
+# Large / generated / local data
+model/
+img/
+log.txt
+recette_fav.json
+*.pdf
