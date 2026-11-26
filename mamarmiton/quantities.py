@@ -133,3 +133,28 @@ def split_quantity_and_name(line: str) -> tuple[str, str]:
         if match and match.group("name").strip():
             return match.group("qty").strip(), match.group("name").strip(" -,.")
     return "", line.strip()
+
+
+# Units offered in the recipe editor's dropdown (any other text is accepted too)
+COMMON_UNITS = ["", "g", "kg", "ml", "cl", "l", "cuil. à soupe", "cuil. à café", "pincée", "sachet",
+                "tranche", "gousse", "verre", "boîte", "botte"]
+_AMOUNT_RE = re.compile(
+    rf"^\s*(?P<amount>(?:{_MIXED}|{_NUM})(?:\s*(?:-|à)\s*(?:{_MIXED}|{_NUM}))?)\s*(?P<unit>.*)$"
+)
+
+
+def split_amount_unit(quantity: str) -> tuple[str, str]:
+    """``"500 g"`` -> ``("500", "g")``; ``"une pincée"`` -> ``("1", "pincée")``; ``"sel"`` -> ``("", "sel")``."""
+    text = _normalize((quantity or "").strip())
+    match = _AMOUNT_RE.match(text)
+    if match:
+        return match.group("amount").strip(), match.group("unit").strip()
+    word = re.match(r"^\s*(\w+)\b\s*(.*)$", text)
+    if word and word.group(1).lower() in NUMBER_WORDS:
+        return str(NUMBER_WORDS[word.group(1).lower()]), word.group(2).strip()
+    return "", text
+
+
+def join_amount_unit(amount: str, unit: str) -> str:
+    """Inverse of :func:`split_amount_unit`: ``("500", "g")`` -> ``"500 g"``."""
+    return " ".join(part for part in (amount.strip(), unit.strip()) if part)

@@ -1,19 +1,94 @@
-"""Home screen: a responsive grid of recipe cards."""
+"""Home screen: greeting, search and filter bar, responsive grid of recipe cards."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import customtkinter as ctk
 
-from mamarmiton.models import Recipe
-from mamarmiton.ui import theme
-from mamarmiton.ui.widgets import RecipeCard
+from mamarmiton.models import COOKING_TYPES, Recipe
+from mamarmiton.search import SORTS, TIME_LIMITS, Filters, parse_ingredient_query
+from mamarmiton.ui import art, theme
+from mamarmiton.ui.widgets import RecipeCard, ScrollFrame
 
 if TYPE_CHECKING:
     from mamarmiton.ui.app import App
 
-GAP = 18
+GAP = 20
+PAD = 36  # left/right margin of the page
+
+ALL_COOKING = "Toutes cuissons"
+ANY_TIME = "Toute durée"
+TIME_LABELS = {(ANY_TIME if v is None else k): k for k, v in TIME_LIMITS.items()}
+SORT_LABELS = {f"Tri : {s[0].lower()}{s[1:]}": s for s in SORTS}
+
+
+def greeting() -> str:
+    hour = datetime.now().hour
+    if hour < 5 or hour >= 18:
+        return "Bonsoir"
+    return "Bonjour"
+
+
+class SearchBox(ctk.CTkFrame):
+    """An entry with an icon and a clear button, inside a rounded field.
+
+    No ``textvariable`` on purpose: customtkinter hides the placeholder when
+    one is set.
+    """
+
+    def __init__(self, master, icon: str, placeholder: str, on_change, height: int = 48):
+        super().__init__(master, fg_color=theme.SURFACE, border_color=theme.BORDER_STRONG, border_width=1,
+                         corner_radius=height // 2, height=height)
+        self.on_change = on_change
+        self._last = ""
+        self._box_height = height
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_propagate(False)
+        self.grid_rowconfigure(0, weight=1)
+        ctk.CTkLabel(self, text="", image=art.icon(icon, theme.MUTED, 18), width=20).grid(
+            row=0, column=0, padx=(18, 6))
+        self.entry = ctk.CTkEntry(self, placeholder_text=placeholder, border_width=0,
+                                  fg_color="transparent", text_color=theme.TEXT, placeholder_text_color=theme.FAINT,
+                                  font=theme.font(15), height=height - 8)
+        self.entry.grid(row=0, column=1, sticky="ew", padx=(0, height // 2 - 4))  # stay off the round end
+        self.clear = ctk.CTkButton(self, text="", width=30, height=30, corner_radius=15, fg_color="transparent",
+                                   hover_color=theme.SURFACE_ALT, image=art.icon("close", theme.MUTED, 14),
+                                   command=lambda: self.set("", notify=True))
+        self.entry.bind("<KeyRelease>", lambda _e: self._typed(), add="+")
+        self.entry.bind("<<Paste>>", lambda _e: self.after(10, self._typed), add="+")
+        self.entry.bind("<FocusIn>", lambda _e: self.configure(border_color=theme.ACCENT), add="+")
+        self.entry.bind("<FocusOut>", lambda _e: self.configure(border_color=theme.BORDER_STRONG), add="+")
+        self.bind("<Button-1>", lambda _e: self.entry.focus_set())
+
+    def get(self) -> str:
+        # while the placeholder shows, CTkEntry.get() already returns ""
+        return self.entry.get()
+
+    def set(self, value: str, notify: bool = False) -> None:
+        self.entry.delete(0, "end")
+        if value:
+            self.entry.insert(0, value)
+        elif self.focus_get() is not self.entry._entry:
+            self.entry._activate_placeholder()
+        self._typed(notify)
+
+    def _typed(self, notify: bool = True) -> None:
+        value = self.get()
+        if value:
+            self.clear.grid(row=0, column=2, padx=(0, 14))
+            self.entry.grid_configure(padx=(0, 4))
+        else:
+            self.clear.grid_forget()
+            self.entry.grid_configure(padx=(0, self._box_height // 2 - 4))
+        if value != self._last:
+            self._last = value
+            if notify:
+                self.on_change()
+
+    def focus_set(self) -> None:
+        self.entry.focus_set()
 
 
 class HomeView(ctk.CTkFrame):
@@ -21,85 +96,245 @@ class HomeView(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.app = app
         self._cards: list[RecipeCard] = []
-        self._columns = 0
+        self._layout_key: tuple[int, int] | None = None
+        self._debounce: str | None = None
+        self._resize_job: str | None = None
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
+        # --- greeting + title
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(24, 8))
-        self.title = ctk.CTkLabel(header, text="Mes recettes", font=theme.font(28, "bold"), text_color=theme.TEXT)
+        header.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(30, 16))
+        self.eyebrow = theme.eyebrow(header, "")
+        self.eyebrow.pack(anchor="w")
+        title_row = ctk.CTkFrame(header, fg_color="transparent")
+        title_row.pack(fill="x", pady=(2, 0))
+        self.title = theme.heading(title_row, "", size=34)
         self.title.pack(side="left")
-        self.count = ctk.CTkLabel(header, text="", font=theme.font(14), text_color=theme.MUTED)
-        self.count.pack(side="left", padx=12, pady=(8, 0))
+        self.count = ctk.CTkLabel(title_row, text="", font=theme.font(14), text_color=theme.MUTED)
+        self.count.pack(side="left", padx=(14, 0), pady=(10, 0))
 
-        self.grid_area = ctk.CTkScrollableFrame(self, fg_color="transparent", corner_radius=0)
-        self.grid_area.grid(row=1, column=0, sticky="nsew", padx=(16, 8), pady=(0, 12))
-        self.grid_area.bind("<Configure>", self._on_resize)
+        # --- search + filters
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.grid(row=1, column=0, sticky="ew", padx=PAD, pady=(0, 18))
+        self.bar = bar
+        self._narrow: bool | None = None
+        bar.grid_columnconfigure(0, weight=3)
+        bar.grid_columnconfigure(1, weight=2)
+
+        self.search = SearchBox(bar, "search", "Rechercher une recette ou un ingrédient…", self._schedule)
+        self.search.grid(row=0, column=0, sticky="ew", padx=(0, 12))
+        self.ingredients = SearchBox(bar, "pot", "J'ai dans le frigo : œufs, farine…", self._schedule)
+        self.ingredients.grid(row=0, column=1, sticky="ew")
+
+        pills = ctk.CTkFrame(bar, fg_color="transparent")
+        self.pills = pills
+        self.m_cuisson = theme.pill_menu(pills, [ALL_COOKING, *COOKING_TYPES], command=lambda _v: self._changed())
+        self.m_temps = theme.pill_menu(pills, list(TIME_LABELS), command=lambda _v: self._changed())
+        self.btn_clear = theme.link_button(pills, text="Effacer les filtres", image=art.icon("reset", theme.ACCENT_TEXT, 14),
+                                           compound="left", command=self.app.reset_filters)
+        self.m_sort = theme.pill_menu(pills, list(SORT_LABELS), width=210, command=lambda _v: self._sort_changed())
+        self._clear_shown = False
+        self._tight: bool | None = None
+        self.clear_filters(silent=True)
+        saved = next((label for label, key in SORT_LABELS.items() if key == app.settings.sort), None)
+        self.m_sort.set(saved or next(iter(SORT_LABELS)))
+
+        # --- cards
+        self.grid_area = ScrollFrame(self)
+        self.grid_area.grid(row=2, column=0, sticky="nsew", padx=(PAD - 6, 8), pady=(0, 8))
+        self.grid_area.bind("<Configure>", self._on_resize, add="+")
+        self.bind("<Configure>", lambda _e: self._arrange_bar(), add="+")
+        self.pills.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+
+    # -------------------------------------------------------------- filters
+    def filters(self) -> Filters:
+        cuisson = self.m_cuisson.get()
+        return Filters(
+            text=self.search.get(),
+            type_cuisson=None if cuisson == ALL_COOKING else cuisson,
+            max_minutes=TIME_LIMITS.get(TIME_LABELS.get(self.m_temps.get(), "")),
+            ingredients=parse_ingredient_query(self.ingredients.get()),
+        )
+
+    def sort(self) -> str:
+        return SORT_LABELS.get(self.m_sort.get(), SORTS[0])
+
+    def clear_filters(self, silent: bool = False) -> None:
+        for box in (self.search, self.ingredients):
+            box.set("")
+        self.m_cuisson.set(ALL_COOKING)
+        self.m_temps.set(ANY_TIME)
+        if self._debounce:
+            self.after_cancel(self._debounce)
+            self._debounce = None
+        if not silent:
+            self._changed()
+
+    def _schedule(self) -> None:
+        if self._debounce:
+            self.after_cancel(self._debounce)
+        self._debounce = self.after(220, self._changed)
+
+    def _changed(self) -> None:
+        self._debounce = None
+        self.app.go_home()
+
+    def _sort_changed(self) -> None:
+        self.app.settings.sort = self.sort()
+        self._changed()
 
     # ------------------------------------------------------------------ api
-    def show(self, recipes: list[Recipe], total: int, filtered: bool) -> None:
+    def show(self, recipes: list[Recipe], total: int, filtered: bool, title: str, category: str | None) -> None:
         for child in self.grid_area.winfo_children():
             child.destroy()
         self._cards = []
-        self._columns = 0
+        self._layout_key = None
 
-        self.title.configure(text="Résultats" if filtered else "Mes recettes")
-        if filtered:
-            self.count.configure(text=f"{len(recipes)} sur {total}")
+        if category is None:
+            self.eyebrow.configure(text=f"{greeting()} !".upper())
+            self.title.configure(text="Qu'est-ce qu'on cuisine ?")
         else:
-            self.count.configure(text=f"{total} recette{'s' if total > 1 else ''}")
+            self.eyebrow.configure(text="VOTRE CARNET")
+            self.title.configure(text=title)
+        n = len(recipes)
+        self.count.configure(text=f"{n} recette{'s' if n > 1 else ''}" if total else "")
+
+        has_filters = not self.filters().is_empty()
+        if has_filters != self._clear_shown:
+            self._clear_shown = has_filters
+            self._place_pills()
 
         if not recipes:
-            self._empty_state(filtered and total > 0)
+            self._empty_state(total, has_filters, category)
             return
 
         store = self.app.store
+        width = self._card_width()[1]
         for recipe in recipes:
             photos = store.image_paths(recipe)
-            card = RecipeCard(self.grid_area, recipe, photos[0] if photos else None,
+            card = RecipeCard(self.grid_area, recipe, photos[0] if photos else None, width,
                               on_open=self.app.open_recipe, on_favorite=self.app.toggle_favorite)
             self._cards.append(card)
         self._layout()
         self.grid_area._parent_canvas.yview_moveto(0)
 
     # -------------------------------------------------------------- layout
-    def _on_resize(self, _event=None) -> None:
-        if self._cards and self._wanted_columns() != self._columns:
-            self._layout()
-
-    def _wanted_columns(self) -> int:
+    def _available_width(self) -> int:
         width = self.grid_area.winfo_width()
         if width <= 1:
-            width = self.winfo_width() - 40
-        return max(1, (width - GAP) // (RecipeCard.WIDTH + GAP))
+            width = self.winfo_width() - 2 * PAD
+        if width <= 1:
+            width = self.app.winfo_width() - 264 - 2 * PAD
+        scaling = ctk.ScalingTracker.get_widget_scaling(self)
+        return max(RecipeCard.MIN_WIDTH, int(width / scaling) - 16)
+
+    def _card_width(self) -> tuple[int, int]:
+        avail = self._available_width()
+        cols = max(1, min(6, (avail + GAP) // (RecipeCard.MIN_WIDTH + GAP)))
+        return cols, (avail - GAP * (cols - 1)) // cols
+
+    def _place_pills(self) -> None:
+        """Filter menus, "clear" link and sort menu; the sort menu gets its own line when tight."""
+        pills = self.pills
+        for w in pills.winfo_children():
+            w.grid_forget()
+        pills.grid_columnconfigure(3, weight=1)
+        self.m_cuisson.grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.m_temps.grid(row=0, column=1, sticky="w", padx=(0, 8))
+        if self._tight:
+            self.m_sort.grid(row=1, column=0, columnspan=4, sticky="w", pady=(8, 0))
+            if self._clear_shown:
+                self.btn_clear.grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        else:
+            if self._clear_shown:
+                self.btn_clear.grid(row=0, column=2, sticky="w", padx=(4, 0))
+            self.m_sort.grid(row=0, column=4, sticky="e")
+
+    def _arrange_bar(self) -> None:
+        """Search boxes side by side, or stacked when the window is narrow."""
+        scaling = ctk.ScalingTracker.get_widget_scaling(self)
+        width = self.winfo_width() / scaling - 2 * PAD
+        if width > 0:
+            count_w = self.count.winfo_reqwidth() / scaling + 14  # the count stays beside the title
+            self.title.configure(wraplength=max(200, int(width - count_w) - 20))
+        tight = 0 < width < 560
+        if tight != self._tight:
+            self._tight = tight
+            self._place_pills()
+        narrow = 0 < width < 760
+        if narrow == self._narrow:
+            return
+        self._narrow = narrow
+        if narrow:
+            self.bar.grid_columnconfigure(1, weight=0)
+            self.search.grid(row=0, column=0, columnspan=2, sticky="ew", padx=0)
+            self.ingredients.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+            self.m_cuisson.configure(width=165)
+            self.m_temps.configure(width=140)
+            self.m_sort.configure(width=180)
+        else:
+            self.bar.grid_columnconfigure(1, weight=2)
+            self.search.grid(row=0, column=0, columnspan=1, sticky="ew", padx=(0, 12))
+            self.ingredients.grid(row=0, column=1, columnspan=1, sticky="ew", pady=0)
+            self.m_cuisson.configure(width=170)
+            self.m_temps.configure(width=170)
+            self.m_sort.configure(width=210)
+        self.pills.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+
+    def _on_resize(self, _event=None) -> None:
+        self._arrange_bar()
+        if self._resize_job:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(120, self._layout)
 
     def _layout(self) -> None:
-        cols = self._wanted_columns()
-        self._columns = cols
-        for c in range(12):
-            self.grid_area.grid_columnconfigure(c, weight=1 if c < cols else 0, uniform="card" if c < cols else "")
+        self._resize_job = None
+        if not self._cards:
+            return
+        cols, width = self._card_width()
+        if self._layout_key == (cols, width):
+            return
+        self._layout_key = (cols, width)
+        for c in range(8):
+            self.grid_area.grid_columnconfigure(c, weight=0, uniform="")
         for i, card in enumerate(self._cards):
-            card.grid(row=i // cols, column=i % cols, padx=GAP // 2, pady=GAP // 2, sticky="nsew")
+            card.set_width(width)
+            col = i % cols
+            card.grid(row=i // cols, column=col, padx=(6 if col == 0 else GAP, 0), pady=(0, GAP), sticky="nsew")
 
-    def _empty_state(self, filtered: bool) -> None:
-        for c in range(12):
+    def _empty_state(self, total: int, filtered: bool, category: str | None) -> None:
+        for c in range(8):
             self.grid_area.grid_columnconfigure(c, weight=0, uniform="")
         self.grid_area.grid_columnconfigure(0, weight=1)
-        box = ctk.CTkFrame(self.grid_area, fg_color="transparent")
-        box.grid(row=0, column=0, pady=80)
-        if filtered:
-            ctk.CTkLabel(box, text="Aucune recette ne correspond", font=theme.font(20, "bold"),
-                         text_color=theme.TEXT).pack()
-            ctk.CTkLabel(box, text="Essayez d'enlever un filtre.", font=theme.font(14),
-                         text_color=theme.MUTED).pack(pady=(6, 16))
-            theme.secondary_button(box, text="Effacer les filtres", command=self.app.sidebar.reset_filters).pack()
-        else:
-            ctk.CTkLabel(box, text="Votre carnet est vide", font=theme.font(22, "bold"),
-                         text_color=theme.TEXT).pack()
-            ctk.CTkLabel(box, text="Ajoutez votre première recette, à la main ou depuis un PDF.",
-                         font=theme.font(14), text_color=theme.MUTED).pack(pady=(6, 18))
-            row = ctk.CTkFrame(box, fg_color="transparent")
+        box = theme.card(self.grid_area, fg_color=theme.SURFACE)
+        box.grid(row=0, column=0, sticky="ew", padx=(6, 12), pady=(10, 0))
+        inner = ctk.CTkFrame(box, fg_color="transparent")
+        inner.pack(pady=56, padx=40)
+        ctk.CTkLabel(inner, text="", image=art.logo(64)).pack(pady=(0, 18))
+        row = ctk.CTkFrame(inner, fg_color="transparent")
+        if total == 0:
+            theme.heading(inner, "Votre carnet est encore vide", size=26).pack()
+            ctk.CTkLabel(inner, text="Ajoutez votre première recette, en l'écrivant ou depuis un PDF.",
+                         font=theme.font(15), text_color=theme.MUTED).pack(pady=(8, 22))
             row.pack()
-            theme.primary_button(row, text="+  Écrire une recette", command=self.app.new_recipe).pack(side="left", padx=6)
-            theme.secondary_button(row, text="Importer un PDF", command=self.app.import_pdf).pack(side="left", padx=6)
+            theme.primary_button(row, text="Écrire une recette", image=art.icon("pencil", theme.ON_ACCENT, 17),
+                                 compound="left", width=200, command=self.app.new_recipe).pack(side="left", padx=6)
+            theme.secondary_button(row, text="Importer un PDF", image=art.icon("pdf", theme.TEXT, 17),
+                                   compound="left", width=190, command=self.app.import_pdf).pack(side="left", padx=6)
+        elif filtered:
+            theme.heading(inner, "Aucune recette ne correspond", size=26).pack()
+            ctk.CTkLabel(inner, text="Essayez un autre mot, ou enlevez un filtre.",
+                         font=theme.font(15), text_color=theme.MUTED).pack(pady=(8, 22))
+            theme.secondary_button(inner, text="Effacer les filtres", image=art.icon("reset", theme.TEXT, 16),
+                                   compound="left", width=200, command=self.app.reset_filters).pack()
+        else:
+            theme.heading(inner, "Rien ici pour l'instant", size=26).pack()
+            what = "favori" if category and category.startswith("__") else "recette dans cette catégorie"
+            hint = ("Cliquez sur l'étoile d'une recette pour la retrouver ici." if what == "favori"
+                    else "Ajoutez-en une, elle apparaîtra ici.")
+            ctk.CTkLabel(inner, text=f"Pas encore de {what}. {hint}", font=theme.font(15),
+                         text_color=theme.MUTED).pack(pady=(8, 22))
+            theme.primary_button(inner, text="Nouvelle recette", image=art.icon("plus", theme.ON_ACCENT, 17),
+                                 compound="left", width=200, command=self.app.new_recipe).pack()

@@ -1,12 +1,10 @@
-"""Dialog windows: recipe editor, PDF import progress, help & settings."""
+"""Dialog windows: PDF import progress, help & settings."""
 
 from __future__ import annotations
 
-import copy
 import logging
 import os
 import queue
-import re
 import subprocess
 import sys
 import threading
@@ -18,163 +16,44 @@ import customtkinter as ctk
 
 from mamarmiton import __version__, config
 from mamarmiton.importers import ImportResult, import_pdf, llm, pdf_text
-from mamarmiton.models import (
-    COOKING_TYPES,
-    DISH_TYPES,
-    Recipe,
-    format_ingredient_lines,
-    parse_ingredient_lines,
-    parse_int,
-    parse_minutes,
-)
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES
-from mamarmiton.ui import theme
-from mamarmiton.ui.widgets import Modal
+from mamarmiton.ui import art, theme
+from mamarmiton.ui.widgets import Choice, Modal, ScrollFrame
 
 if TYPE_CHECKING:
     from mamarmiton.ui.app import App
 
 log = logging.getLogger(__name__)
 
-def _strip_step_number(line: str) -> str:
-    return re.sub(r"^\s*(?:[ée]tape\s*)?\d{1,2}\s*[).:\-–]\s*|^\s*[-•*]\s*", "", line, flags=re.IGNORECASE).strip()
-
-
-# --------------------------------------------------------------------------
-# Recipe editor
-# --------------------------------------------------------------------------
-class RecipeForm(Modal):
-    """Create or edit a recipe. ``on_save`` receives the new Recipe object."""
-
-    def __init__(self, master, recipe: Recipe | None, on_save: Callable[[Recipe], None],
-                 title: str | None = None, banner: str | None = None):
-        self.original = recipe
-        self.recipe = copy.deepcopy(recipe) if recipe else Recipe(nom="")
-        self.on_save = on_save
-        heading = title or ("Modifier la recette" if recipe and recipe.nom else "Nouvelle recette")
-        super().__init__(master, heading, 760, 860)
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-
-        ctk.CTkLabel(self, text=heading, font=theme.font(24, "bold"), text_color=theme.TEXT).grid(
-            row=0, column=0, sticky="w", padx=28, pady=(22, 6))
-
-        form = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        form.grid(row=1, column=0, sticky="nsew", padx=14)
-        form.grid_columnconfigure((0, 1, 2), weight=1, uniform="f")
-        self.form = form
-        row = 0
-
-        if banner:
-            ban = ctk.CTkLabel(form, text=banner, fg_color=theme.ACCENT_SOFT, text_color=theme.TEXT, corner_radius=10,
-                               font=theme.font(13), justify="left", anchor="w", wraplength=650)
-            ban.grid(row=row, column=0, columnspan=3, sticky="ew", padx=14, pady=(4, 12), ipadx=10, ipady=8)
-            row += 1
-
-        r = self.recipe
-        self.e_nom = self._field(form, row, 0, 3, "Nom de la recette *", theme.entry(form, placeholder_text="ex. Gâteau au chocolat"))
-        self.e_nom.insert(0, r.nom)
-        row += 2
-
-        self.e_prep = self._field(form, row, 0, 1, "Préparation (min)", theme.entry(form, placeholder_text="ex. 20 ou 1h30"))
-        self.e_cook = self._field(form, row, 1, 1, "Cuisson (min)", theme.entry(form, placeholder_text="ex. 45"))
-        self.e_pour = self._field(form, row, 2, 1, "Nombre de personnes", theme.entry(form))
-        if r.temps:
-            self.e_prep.insert(0, str(r.temps))
-        if r.temps_cuisson:
-            self.e_cook.insert(0, str(r.temps_cuisson))
-        self.e_pour.insert(0, str(r.pour))
-        row += 2
-
-        self.m_plat = self._field(form, row, 0, 1, "Type de plat", theme.option_menu(form, DISH_TYPES))
-        self.m_plat.set(r.type_plat)
-        self.m_cuisson = self._field(form, row, 1, 1, "Cuisson", theme.option_menu(form, COOKING_TYPES))
-        self.m_cuisson.set(r.type_cuisson)
-        self.fav = ctk.BooleanVar(value=r.favori)
-        fav_box = ctk.CTkCheckBox(form, text="★ Favori", variable=self.fav, font=theme.font(14), text_color=theme.TEXT,
-                                  fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER, border_color=theme.BORDER)
-        fav_box.grid(row=row + 1, column=2, sticky="w", padx=14)
-        row += 2
-
-        self.t_ing = self._field(form, row, 0, 3, "Ingrédients — un par ligne (ex. « Farine: 500 g » ou « 3 oeufs »)",
-                                 theme.textbox(form, height=190))
-        self.t_ing.insert("1.0", format_ingredient_lines(r.ingredients))
-        row += 2
-
-        self.t_steps = self._field(form, row, 0, 3, "Étapes — une par ligne, dans l'ordre", theme.textbox(form, height=230))
-        self.t_steps.insert("1.0", "\n".join(r.etapes))
-        row += 2
-
-        self.t_notes = self._field(form, row, 0, 3, "Notes (astuces, variantes…)", theme.textbox(form, height=80))
-        self.t_notes.insert("1.0", r.notes)
-        row += 2
-
-        footer = ctk.CTkFrame(self, fg_color="transparent")
-        footer.grid(row=2, column=0, sticky="ew", padx=28, pady=(8, 20))
-        self.error = ctk.CTkLabel(footer, text="", text_color=theme.DANGER, font=theme.font(13, "bold"))
-        self.error.pack(side="left")
-        theme.primary_button(footer, text="Enregistrer", width=140, command=self._submit).pack(side="right")
-        theme.secondary_button(footer, text="Annuler", width=110, command=self.close).pack(side="right", padx=10)
-        self.bind("<Control-s>", lambda _e: self._submit())
-        self.after(150, self.e_nom.focus_set)
-
-    @staticmethod
-    def _field(form, row: int, col: int, span: int, label: str, widget):
-        ctk.CTkLabel(form, text=label, font=theme.font(13, "bold"), text_color=theme.MUTED, anchor="w").grid(
-            row=row, column=col, columnspan=span, sticky="w", padx=14, pady=(10, 4))
-        widget.grid(row=row + 1, column=col, columnspan=span, sticky="ew", padx=14)
-        return widget
-
-    def _submit(self) -> None:
-        nom = self.e_nom.get().strip()
-        if not nom:
-            self.error.configure(text="Donnez un nom à la recette.")
-            self.e_nom.configure(border_color=theme.DANGER)
-            self.e_nom.focus_set()
-            return
-        for widget, label in ((self.e_prep, "préparation"), (self.e_cook, "cuisson")):
-            raw = widget.get().strip()
-            if raw and parse_minutes(raw) == 0 and not raw.startswith("0"):
-                self.error.configure(text=f"Temps de {label} illisible : écrivez par ex. 20 ou 1h30.")
-                widget.configure(border_color=theme.DANGER)
-                return
-        r = self.recipe
-        r.nom = nom
-        r.temps = parse_minutes(self.e_prep.get())
-        r.temps_cuisson = parse_minutes(self.e_cook.get())
-        r.pour = parse_int(self.e_pour.get(), default=4, minimum=1)
-        r.type_plat = self.m_plat.get()
-        r.type_cuisson = self.m_cuisson.get()
-        r.favori = self.fav.get()
-        r.ingredients = parse_ingredient_lines(self.t_ing.get("1.0", "end"))
-        r.etapes = [s for s in (_strip_step_number(x) for x in self.t_steps.get("1.0", "end").splitlines()) if s]
-        r.notes = self.t_notes.get("1.0", "end").strip()
-        try:
-            self.on_save(r)
-        except Exception as exc:
-            log.exception("Saving recipe failed")
-            messagebox.showerror("Erreur", f"Impossible d'enregistrer la recette :\n{exc}", parent=self)
-            return
-        self.close()
-
-
 # --------------------------------------------------------------------------
 # PDF import with progress
 # --------------------------------------------------------------------------
 class ImportDialog(Modal):
     def __init__(self, master, pdf_path: Path, use_ai: bool, on_done: Callable[[ImportResult], None]):
-        super().__init__(master, "Import d'un PDF", 480, 200)
+        super().__init__(master, "Import d'un PDF", 520, 250)
         self.resizable(False, False)
         self.on_done = on_done
         self.messages: queue.Queue = queue.Queue()
 
-        ctk.CTkLabel(self, text=f"Import de « {pdf_path.name} »", font=theme.font(17, "bold"),
-                     text_color=theme.TEXT, wraplength=420).pack(padx=24, pady=(24, 6))
-        self.status = ctk.CTkLabel(self, text="Préparation…", font=theme.font(13), text_color=theme.MUTED)
-        self.status.pack(padx=24)
-        self.bar = ctk.CTkProgressBar(self, mode="indeterminate", width=400, progress_color=theme.ACCENT)
-        self.bar.pack(padx=24, pady=18)
+        box = ctk.CTkFrame(self, fg_color="transparent")
+        box.pack(fill="both", expand=True, padx=30, pady=26)
+        top = ctk.CTkFrame(box, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(top, text="", width=52, height=52, corner_radius=16, fg_color=theme.ACCENT_SOFT,
+                     image=art.icon("pdf", theme.ACCENT_TEXT, 24)).pack(side="left")
+        words = ctk.CTkFrame(top, fg_color="transparent")
+        words.pack(side="left", fill="x", expand=True, padx=(16, 0))
+        theme.heading(words, "Lecture de la recette…", size=20).pack(anchor="w")
+        ctk.CTkLabel(words, text=pdf_path.name, font=theme.font(13), text_color=theme.MUTED, anchor="w",
+                     wraplength=360, justify="left").pack(anchor="w")
+        self.bar = ctk.CTkProgressBar(box, mode="indeterminate", height=8, corner_radius=4,
+                                      progress_color=theme.ACCENT, fg_color=theme.SURFACE_ALT)
+        self.bar.pack(fill="x", pady=(24, 10))
         self.bar.start()
+        self.status = ctk.CTkLabel(box, text="Préparation…", font=theme.font(13), text_color=theme.MUTED, anchor="w")
+        self.status.pack(anchor="w")
+        ctk.CTkLabel(box, text="Cela peut prendre une minute. Vous pourrez tout vérifier ensuite.",
+                     font=theme.font(12), text_color=theme.FAINT, anchor="w").pack(anchor="w", pady=(2, 0))
         self.protocol("WM_DELETE_WINDOW", lambda: None)  # cannot cancel a running native call
         self.unbind("<Escape>")
 
@@ -214,14 +93,16 @@ class ImportDialog(Modal):
 # --------------------------------------------------------------------------
 # Help & settings
 # --------------------------------------------------------------------------
-HELP_TEXT = """\
-• Nouvelle recette : bouton « + Nouvelle recette » à gauche.
-• Importer un PDF : l'application lit le PDF, puis vous montre la recette pour vérification avant de l'enregistrer.
-• Rechercher : tapez un mot (nom ou ingrédient) dans la barre de recherche ; les filtres en dessous affinent la liste.
-• Changer le nombre de personnes : boutons - et + sur la page d'une recette. Les quantités s'adaptent, la recette enregistrée ne change pas.
-• Favoris : cliquez sur l'étoile ☆ d'une recette ; les favoris apparaissent en premier.
-• Photos : bouton « + Ajouter » dans la case Photos d'une recette.
-• Tout est enregistré automatiquement sur cet ordinateur, avec une copie de sécurité."""
+HELP_ITEMS = [
+    ("plus", "Ajouter une recette", "Bouton « Nouvelle recette » en bas à gauche, ou Ctrl+N. Pour chaque ingrédient : le nom, la quantité, puis l'unité. Entrée passe à la case suivante ; Ctrl+S enregistre."),
+    ("pdf", "Importer un PDF", "L'application lit le PDF, puis vous montre la recette pour vérification avant de l'enregistrer."),
+    ("search", "Retrouver une recette", "Tapez un mot dans la barre de recherche (Ctrl+F). Les catégories à gauche et les filtres affinent la liste."),
+    ("pot", "Cuisiner avec ce qu'on a", "Écrivez vos ingrédients dans « J'ai dans le frigo » : seules les recettes qui les utilisent restent."),
+    ("users", "Changer le nombre de personnes", "Boutons − et + sur la page d'une recette. Les quantités s'adaptent, la recette enregistrée ne change pas."),
+    ("check", "Suivre en cuisinant", "Cliquez sur un ingrédient ou une étape pour le cocher quand c'est fait."),
+    ("star", "Favoris", "Cliquez sur l'étoile d'une recette ; retrouvez-les dans « Favoris » à gauche."),
+    ("photo", "Photos", "Bouton « Ajouter une photo » sur la page d'une recette. La première sert de couverture."),
+]
 
 
 def open_folder(path: Path) -> None:
@@ -238,52 +119,102 @@ def open_folder(path: Path) -> None:
 
 class HelpDialog(Modal):
     def __init__(self, master, app: "App"):
-        super().__init__(master, "Aide et réglages", 640, 760)
+        super().__init__(master, "Aide et réglages", 700, 820)
         self.app = app
-        body = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=12, pady=12)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self.header("Aide et réglages", "Tout ce qu'il faut savoir, et quelques préférences.")
+        body = ScrollFrame(self)
+        body.grid(row=1, column=0, sticky="nsew", padx=(18, 8))
+        body.grid_columnconfigure(0, weight=1)
+        wrapped: list[tuple[ctk.CTkLabel, int]] = []  # (label, px used beside it in the body)
 
-        ctk.CTkLabel(body, text="Aide", font=theme.font(24, "bold"), text_color=theme.TEXT).pack(anchor="w", padx=12, pady=(8, 6))
-        ctk.CTkLabel(body, text=HELP_TEXT, font=theme.font(14), text_color=theme.TEXT, justify="left", anchor="w",
-                     wraplength=560).pack(anchor="w", padx=12)
+        def rewrap(event) -> None:
+            width = event.width / ctk.ScalingTracker.get_widget_scaling(self)
+            for label, used in wrapped:
+                label.configure(wraplength=max(160, int(width - used)))
 
-        ctk.CTkLabel(body, text="Réglages", font=theme.font(24, "bold"), text_color=theme.TEXT).pack(anchor="w", padx=12, pady=(24, 6))
+        body.bind("<Configure>", rewrap)
+
+        # --- how-to
+        card = theme.card(body)
+        card.pack(fill="x", padx=10, pady=(0, 16))
+        theme.heading(card, "Comment faire ?", size=19).pack(anchor="w", padx=20, pady=(18, 6))
+        for icon, title, text in HELP_ITEMS:
+            row = ctk.CTkFrame(card, fg_color="transparent")
+            row.pack(fill="x", padx=16, pady=5)
+            row.grid_columnconfigure(1, weight=1)
+            ctk.CTkLabel(row, text="", width=36, height=36, corner_radius=12, fg_color=theme.ACCENT_SOFT,
+                         image=art.icon(icon, theme.ACCENT_TEXT, 18)).grid(row=0, column=0, rowspan=2, sticky="n",
+                                                                        padx=(4, 12))
+            ctk.CTkLabel(row, text=title, font=theme.font(14, "bold"), text_color=theme.TEXT, anchor="w").grid(
+                row=0, column=1, sticky="w")
+            label = ctk.CTkLabel(row, text=text, font=theme.font(13), text_color=theme.MUTED, anchor="w",
+                                 justify="left", wraplength=520)
+            label.grid(row=1, column=1, sticky="w")
+            wrapped.append((label, 2 * 10 + 2 * 16 + 52 + 8))  # card margin, row padding, icon
+        ctk.CTkFrame(card, fg_color="transparent", height=1, width=1).pack(pady=(0, 10))
+
+        # --- settings
         settings = app.settings
+        card = theme.card(body)
+        card.pack(fill="x", padx=10, pady=(0, 16))
+        card.grid_columnconfigure(0, weight=1)
+        theme.heading(card, "Réglages", size=19).grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(18, 6))
 
-        def setting_row(label: str, widget_factory):
-            row = ctk.CTkFrame(body, fg_color="transparent")
-            row.pack(fill="x", padx=12, pady=5)
-            ctk.CTkLabel(row, text=label, font=theme.font(14), text_color=theme.TEXT).pack(side="left")
-            widget = widget_factory(row)
-            widget.pack(side="right")
+        def setting_row(row: int, label: str, hint: str, widget, below: bool = False):
+            """Each setting uses grid rows 2*row (label) and 2*row+1 (control, when below)."""
+            words = ctk.CTkFrame(card, fg_color="transparent")
+            words.grid(row=2 * row, column=0, sticky="w", padx=20, pady=(10, 6 if below else 10))
+            ctk.CTkLabel(words, text=label, font=theme.font(14, "bold"), text_color=theme.TEXT, anchor="w").pack(anchor="w")
+            ctk.CTkLabel(words, text=hint, font=theme.font(12), text_color=theme.MUTED, anchor="w").pack(anchor="w")
+            if below:  # a row of pills is too wide to sit next to its label
+                widget.grid(row=2 * row + 1, column=0, columnspan=2, sticky="w", padx=20, pady=(0, 10))
+            else:
+                widget.grid(row=2 * row, column=1, sticky="e", padx=20)
             return widget
 
-        appearance = setting_row("Apparence", lambda m: theme.option_menu(m, list(APPEARANCES), width=200,
-                                                                            command=app.set_appearance))
+        appearance = setting_row(1, "Apparence", "Clair le jour, sombre le soir…",
+                                 Choice(card, list(APPEARANCES), command=app.set_appearance, height=38), below=True)
         appearance.set(settings.appearance)
-        size = setting_row("Taille du texte", lambda m: theme.option_menu(m, list(TEXT_SIZES), width=200,
-                                                                           command=app.set_text_size))
+        size = setting_row(2, "Taille du texte", "Agrandit tout l'écran.",
+                           Choice(card, list(TEXT_SIZES), command=app.set_text_size, height=38), below=True)
         size.set(settings.text_size)
         ai_var = ctk.BooleanVar(value=settings.use_ai)
-        setting_row("Utiliser l'IA pour lire les PDF", lambda m: ctk.CTkSwitch(
-            m, text="", variable=ai_var, progress_color=theme.ACCENT, command=lambda: app.set_use_ai(ai_var.get())))
+        setting_row(3, "Lire les PDF avec l'IA", "Plus précis, mais un peu plus lent.",
+                    theme.switch(card, text="", variable=ai_var, width=50, command=lambda: app.set_use_ai(ai_var.get())))
+        ctk.CTkFrame(card, fg_color="transparent", height=1, width=1).grid(row=8, column=0, pady=(0, 10))
 
-        ctk.CTkLabel(body, text="Sauvegardes", font=theme.font(24, "bold"), text_color=theme.TEXT).pack(anchor="w", padx=12, pady=(24, 6))
-        buttons = ctk.CTkFrame(body, fg_color="transparent")
-        buttons.pack(fill="x", padx=12)
-        theme.secondary_button(buttons, text="Exporter mes recettes…", command=app.export_recipes).pack(side="left", padx=(0, 8))
-        theme.secondary_button(buttons, text="Importer un fichier…", command=app.import_backup).pack(side="left", padx=(0, 8))
-        theme.ghost_button(buttons, text="Ouvrir le dossier", text_color=theme.ACCENT,
-                           command=lambda: open_folder(config.data_dir())).pack(side="left")
+        # --- backups
+        card = theme.card(body)
+        card.pack(fill="x", padx=10, pady=(0, 16))
+        theme.heading(card, "Sauvegardes", size=19).pack(anchor="w", padx=20, pady=(18, 0))
+        label = ctk.CTkLabel(card, text="Vos recettes sont enregistrées automatiquement. Vous pouvez aussi en garder "
+                             "une copie.", font=theme.font(13), text_color=theme.MUTED, anchor="w", wraplength=560,
+                             justify="left")
+        label.pack(anchor="w", padx=20, pady=(2, 12))
+        wrapped.append((label, 2 * 10 + 2 * 20 + 4))
+        buttons = ctk.CTkFrame(card, fg_color="transparent")
+        buttons.pack(fill="x", padx=20, pady=(0, 20))
+        theme.secondary_button(buttons, text="Exporter mes recettes", width=0, command=app.export_recipes).pack(
+            side="left", padx=(0, 8))
+        theme.secondary_button(buttons, text="Importer un fichier", width=0, command=app.import_backup).pack(
+            side="left", padx=(0, 8))
+        theme.link_button(buttons, text="Ouvrir le dossier", height=42,
+                          command=lambda: open_folder(config.data_dir())).pack(side="left")
 
         ai_status = "prête" if llm.is_available() else "indisponible (modèle ou llama-cpp manquant)"
         ocr_status = "disponible" if pdf_text.ocr_available() else "indisponible (Tesseract non installé)"
-        info = (f"Version {__version__}\nDonnées : {config.data_dir()}\n"
-                f"IA de lecture des PDF : {ai_status}\nLecture des scans (OCR) : {ocr_status}")
-        ctk.CTkLabel(body, text=info, font=theme.font(12), text_color=theme.MUTED, justify="left", anchor="w",
-                     wraplength=560).pack(anchor="w", padx=12, pady=(24, 8))
+        info = (f"Version {__version__}  ·  Données : {config.data_dir()}\n"
+                f"IA de lecture des PDF : {ai_status}  ·  Lecture des scans (OCR) : {ocr_status}")
+        label = ctk.CTkLabel(body, text=info, font=theme.font(11), text_color=theme.FAINT, justify="left", anchor="w",
+                             wraplength=600)
+        label.pack(anchor="w", padx=14, pady=(0, 12))
+        wrapped.append((label, 2 * 14 + 4))
 
-        theme.primary_button(self, text="Fermer", width=120, command=self.close).pack(pady=(0, 16))
+        footer = ctk.CTkFrame(self, fg_color="transparent")
+        footer.grid(row=2, column=0, sticky="ew", padx=28, pady=(6, 18))
+        theme.primary_button(footer, text="Fermer", width=130, command=self.close).pack(side="right")
 
 
 def ask_pdf(parent) -> Path | None:

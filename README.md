@@ -101,12 +101,13 @@ mamarmiton/
     llm.py                 local LLM parser (llama-cpp)
     pipeline.py            PDF → Recipe: AI + rules, cross-checked
   ui/
-    app.py                 main window, sidebar, actions
-    home.py                card grid
-    detail.py              recipe page, servings calculator, photos
+    app.py                 main window, category sidebar, actions
+    home.py                greeting, search + filter bar, responsive card grid
+    detail.py              recipe page: cover, key facts, servings calculator, tickable steps, photos
     dialogs.py             recipe editor, import progress, help & settings
-    widgets.py             recipe card, modal base, image cache
-    theme.py               colours (light/dark), fonts, styled widget factories
+    widgets.py             recipe card, sidebar item, modal base
+    art.py                 Pillow-drawn icons, generated cover art, rounded photos (light/dark)
+    theme.py               design tokens (light/dark colours, fonts), styled widget factories
 tests/                     pytest suite (no GUI needed)
 ```
 

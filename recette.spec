@@ -6,7 +6,7 @@
 
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
 
-datas = [("assets/icon.ico", "assets")]
+datas = [("assets/icon.ico", "assets"), ("assets/fonts", "assets/fonts")]
 binaries = []
 hiddenimports = []
 

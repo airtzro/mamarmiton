@@ -45,3 +45,31 @@ def test_format_number():
 ])
 def test_split_quantity_and_name(line, expected):
     assert split_quantity_and_name(line) == expected
+
+
+@pytest.mark.parametrize("qty, expected", [
+    ("500 g", ("500", "g")),
+    ("1/2 sachet", ("1/2", "sachet")),
+    ("2-3", ("2-3", "")),
+    ("2,5 kg", ("2,5", "kg")),
+    ("une pincée", ("1", "pincée")),
+    ("½ citron", ("1/2", "citron")),
+    ("", ("", "")),
+    ("un peu", ("1", "peu")),
+])
+def test_split_amount_unit(qty, expected):
+    from mamarmiton.quantities import join_amount_unit, split_amount_unit
+
+    assert split_amount_unit(qty) == expected
+    amount, unit = expected
+    if amount:
+        assert scale_quantity(join_amount_unit(amount, unit), 2) != join_amount_unit(amount, unit)
+
+
+def test_join_amount_unit():
+    from mamarmiton.quantities import join_amount_unit, scale_quantity
+
+    assert join_amount_unit("500", "g") == "500 g"
+    assert join_amount_unit("", "") == ""
+    assert join_amount_unit("3", "") == "3"
+    assert scale_quantity(join_amount_unit("2", "cuil. à soupe"), 2) == "4 cuil. à soupe"
