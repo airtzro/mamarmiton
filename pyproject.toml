@@ -1,0 +1,33 @@
+[project]
+name = "mamarmiton"
+version = "4.0.0"
+description = "Carnet de recettes de bureau, avec import de PDF par IA locale"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "customtkinter>=5.2",
+    "pdfplumber>=0.11",
+    "pillow>=10",
+]
+
+[project.optional-dependencies]
+# Local AI parsing of PDFs. On machines without a C++ compiler, install from
+# the prebuilt CPU wheels:
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+ai = ["llama-cpp-python>=0.3"]
+# Reading scanned PDFs (also needs the Tesseract and Poppler programs)
+ocr = ["pdf2image>=1.17", "pytesseract>=0.3"]
+dev = ["pytest>=8", "pyinstaller>=6"]
+
+[project.scripts]
+mamarmiton = "mamarmiton.ui.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mamarmiton*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

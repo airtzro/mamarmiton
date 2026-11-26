@@ -2,15 +2,19 @@
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
+*.egg-info/
 
 # PyInstaller output
 build/
 dist/
 *.exe
 
-# Large / generated / local data
+# Large / generated / local data (recipes live in the user data folder)
 model/
 img/
 log.txt
+recette.json
 recette_fav.json
 *.pdf
+!tests/fixtures/*.pdf
