@@ -1,0 +1,3 @@
+# Nightly backup at 03:15, as the NAS user: `crontab -e` and paste (adapt the USB uuid).
+# Without sudo you can instead create the same line in OMV: System > Scheduled jobs.
+15 3 * * * /opt/mamarmiton/app/server/ops/backup-cron.sh /srv/dev-disk-by-uuid-XXXX/mamarmiton-backups >/dev/null 2>&1

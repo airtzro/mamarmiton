@@ -79,7 +79,7 @@ The web page is part of the `api` image, so the update command below also update
 |---|---|
 | List accounts | `docker compose exec api python -m mamarmiton_server users` |
 | Forgotten password | `docker compose exec -it api python -m mamarmiton_server reset-password maman` (signs out all of her devices) |
-| Back up | `docker compose exec api python -m mamarmiton_server backup /data/backups/mamarmiton.sqlite3`, then copy `DATA_DIR` (database copy plus `images/`) with OMV's backup or rsync job |
+| Back up | `docker compose exec api python -m mamarmiton_server backup /data/backups` (database + photos, one `.tar.gz`); nightly job, restore drill and uptime monitoring: see [`ops/README.md`](ops/README.md) |
 | Update | `git pull && docker compose up -d --build` |
 | Logs | `docker compose logs --tail 100 api caddy` |
 
