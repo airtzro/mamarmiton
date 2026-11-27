@@ -113,7 +113,7 @@ class RecipeStore:
         if not self.path.exists() or self.path.stat().st_size == 0:
             return []
         try:
-            with open(self.path, encoding="utf-8") as f:
+            with open(self.path, encoding="utf-8-sig") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             aside = self.path.with_name(f"recette.corrompu-{datetime.now():%Y%m%d-%H%M%S}.json")
@@ -128,7 +128,7 @@ class RecipeStore:
             bak = self.path.with_suffix(".json.bak")
             if bak.exists():
                 try:
-                    with open(bak, encoding="utf-8") as f:
+                    with open(bak, encoding="utf-8-sig") as f:
                         data = json.load(f)
                     self.warnings.append("La dernière sauvegarde automatique a été restaurée.")
                 except (json.JSONDecodeError, UnicodeDecodeError):
@@ -150,7 +150,7 @@ class RecipeStore:
         if not fav_path.exists():
             return False
         try:
-            with open(fav_path, encoding="utf-8") as f:
+            with open(fav_path, encoding="utf-8-sig") as f:
                 favs = json.load(f)
         except (OSError, json.JSONDecodeError):
             favs = []
@@ -278,7 +278,7 @@ class RecipeStore:
 
     def import_from(self, path: Path) -> int:
         """Add the recipes of another MAMARMITON JSON file; returns how many."""
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:
             data = json.load(f)
         if isinstance(data, dict):
             data = data.get("recettes", [data])

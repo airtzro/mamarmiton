@@ -45,7 +45,11 @@ def normalize_url(text: str) -> str:
     if parts.scheme not in ("http", "https") or not parts.netloc or " " in url:
         raise WebImportError("Ce n'est pas une adresse de site valide. Copiez l'adresse complète de la page "
                              "(elle commence par « https:// »).")
-    return url
+    # accents typed or pasted as-is would make urllib fail with an encoding error
+    safe = "%:/?#[]@!$&'()*+,;=-._~"
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, urllib.parse.quote(parts.path, safe=safe),
+                                    urllib.parse.quote(parts.query, safe=safe),
+                                    urllib.parse.quote(parts.fragment, safe=safe)))
 
 
 def _read_limited(response, limit: int) -> bytes:
