@@ -40,7 +40,21 @@ ping_hc() {  # ping_hc [suffix]  (suffix: /start, /fail, or nothing for success)
   curl -fsS -m 15 --retry 3 -o /dev/null "${HEALTHCHECK_URL}${1:-}" || log "WARN: healthcheck ping failed"
 }
 
-fail() { log "ERROR: $*"; ping_hc /fail; exit 1; }
+# the admin dashboard (/admin) reads this file to show how the last night went
+STATUS_FILE="$DATA_DIR/backups/last-run.json"
+name=""
+offsite="off"
+write_status() {  # write_status <exit code> <message>
+  local msg=${2//\\/\\\\}; msg=${msg//\"/\\\"}
+  mkdir -p "$DATA_DIR/backups" 2>/dev/null
+  printf '{"finished_at": "%s", "exit": %d, "message": "%s", "snapshot": "%s", "usb": %s, "offsite": "%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)" "$1" "$msg" "$name" \
+    "$( [ -n "$name" ] && [ -f "$USB_DIR/$name" ] && echo true || echo false )" "$offsite" \
+    > "$STATUS_FILE.tmp" 2>/dev/null && mv "$STATUS_FILE.tmp" "$STATUS_FILE" 2>/dev/null
+  return 0
+}
+
+fail() { log "ERROR: $*"; write_status 1 "$*"; ping_hc /fail; exit 1; }
 
 # keep the log small
 if [ -f "$LOG_FILE" ] && [ "$(stat -c %s "$LOG_FILE")" -gt 1048576 ]; then
@@ -88,20 +102,21 @@ fi
 
 if [ -n "$RCLONE_REMOTE" ]; then
   if ! command -v rclone >/dev/null; then
-    log "ERROR: RCLONE_REMOTE is set but rclone is not installed"; ping_hc /fail; status=1
+    log "ERROR: RCLONE_REMOTE is set but rclone is not installed"; ping_hc /fail; status=1; offsite="failed"
   elif rclone copy --immutable "$USB_DIR/$name" "$RCLONE_REMOTE" 2>&1 | while read -r l; do log "rclone: $l"; done; then
     # (pipefail: the status above is rclone's)
     rclone delete --min-age "${OFFSITE_KEEP_DAYS}d" --include 'mamarmiton-*.tar.gz' "$RCLONE_REMOTE" 2>&1 \
       | while read -r l; do log "rclone: $l"; done
-    log "off-site copy ok: $RCLONE_REMOTE/$name"
+    log "off-site copy ok: $RCLONE_REMOTE/$name"; offsite="ok"
   else
-    log "ERROR: off-site copy failed"; ping_hc /fail; status=1
+    log "ERROR: off-site copy failed"; ping_hc /fail; status=1; offsite="failed"
   fi
 fi
 
 if [ $status -eq 0 ]; then
-  log "=== backup ok ==="; ping_hc
+  log "=== backup ok ==="; write_status 0 "ok"; ping_hc
 else
+  write_status "$status" "$( [ $status -eq 2 ] && echo "sauvegarde incomplète (voir backup.log)" || echo "copie hors site en échec (voir backup.log)" )"
   log "=== backup finished with problems (exit $status) ==="; [ $status -eq 2 ] && ping_hc /fail
 fi
 exit $status

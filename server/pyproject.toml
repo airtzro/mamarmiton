@@ -24,7 +24,7 @@ build-backend = "setuptools.build_meta"
 include = ["mamarmiton_server*"]
 
 [tool.setuptools.package-data]
-mamarmiton_server = ["web/*", "web/fonts/*"]
+mamarmiton_server = ["web/*", "web/fonts/*", "web/admin/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

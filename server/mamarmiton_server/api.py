@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from mamarmiton.models import Recipe
 from mamarmiton.redact import redact
-from mamarmiton_server import __version__, db, images, security, usage
+from mamarmiton_server import __version__, admin, db, images, security, usage
 from mamarmiton_server.config import Settings
 
 log = logging.getLogger(__name__)
@@ -430,6 +430,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         static = path.suffix.lower() in (".woff2", ".ttf", ".png")
         headers = {**WEB_COMMON_HEADERS, "Cache-Control": "public, max-age=604800" if static else "no-cache"}
         return FileResponse(path, media_type=media_type, headers=headers)
+
+    @app.api_route("/admin", methods=["GET", "HEAD"], include_in_schema=False)
+    def admin_page() -> FileResponse:
+        # the page itself is public (it is only a login form + code); every number comes from /admin/api
+        return FileResponse(WEB_DIR / "admin" / "index.html", media_type="text/html; charset=utf-8",
+                            headers={**WEB_PAGE_HEADERS, "X-Robots-Tag": "noindex, nofollow"})
+
+    admin.register(app, settings, limiter, Conn, Admin, client_ip)
 
     # --------------------------------------------------------------- misc
     @app.get("/health")

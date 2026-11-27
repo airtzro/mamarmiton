@@ -67,3 +67,35 @@ def record(conn: sqlite3.Connection, kind: str, rows: list[tuple[str, str, int]]
         "INSERT INTO usage_daily (day, client_kind, event, count) VALUES (?, ?, ?, ?) "
         "ON CONFLICT (day, client_kind, event) DO UPDATE SET count = count + excluded.count",
         [(day, kind, event, count) for day, event, count in rows])
+
+
+def weekly_summary(conn: sqlite3.Connection, days: int = 56, today: date | None = None) -> dict:
+    """Events x weeks over the last ``days`` (rounded up to whole weeks ending today).
+
+    ``events`` is sorted least used first (total, then distinct days, then name): what nobody uses
+    is what the product plan wants to see. ``active`` holds device-days per client kind.
+    """
+    today = today or date.today()
+    days = max(7, min(days, 7 * 52))
+    weeks = (days + 6) // 7
+    start = today - timedelta(days=weeks * 7 - 1)
+    totals: dict[str, list[int]] = {e: [0] * weeks for e in EVENTS}
+    used_days: dict[str, set[str]] = {e: set() for e in EVENTS}
+    active = {kind: [0] * weeks for kind in (*KINDS, "other")}
+    for row in conn.execute("SELECT day, client_kind, event, count FROM usage_daily WHERE day >= ? AND day <= ?",
+                            (start.isoformat(), today.isoformat())):
+        week = (date.fromisoformat(row[0]) - start).days // 7
+        if row[2] == ACTIVE:
+            active.setdefault(row[1], [0] * weeks)[week] += row[3]
+        elif row[2] in totals:
+            totals[row[2]][week] += row[3]
+            used_days[row[2]].add(row[0])
+    order = sorted(EVENTS, key=lambda e: (sum(totals[e]), len(used_days[e]), e))
+    return {
+        "start": start.isoformat(),
+        "end": today.isoformat(),
+        "weeks": [(start + timedelta(days=7 * w)).isoformat() for w in range(weeks)],
+        "events": [{"event": e, "counts": totals[e], "total": sum(totals[e]), "days": len(used_days[e])}
+                   for e in order],
+        "active": {kind: counts for kind, counts in active.items() if any(counts) or kind in KINDS},
+    }

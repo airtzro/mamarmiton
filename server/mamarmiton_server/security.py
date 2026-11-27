@@ -126,3 +126,31 @@ class LoginLimiter:
     def succeeded(self, ip: str, username: str) -> None:
         with self._lock:
             self._fails.pop((ip, username), None)
+
+    def blocked(self) -> list[dict]:
+        """Who is currently locked out: ``[{"ip", "username", "failures", "retry_after"}]``.
+        ``username`` is "" for a whole-address block; "pw:<name>" keys are password-change tries."""
+        now = time.monotonic()
+        out = []
+        with self._lock:
+            for key in list(self._fails):
+                q = self._recent(key, now)
+                limit = self.attempts * 4 if key[1] == "" else self.attempts
+                if len(q) >= limit:
+                    out.append({"ip": key[0], "username": key[1], "failures": len(q),
+                                "retry_after": int(self.window_s - (now - q[0])) + 1})
+        return sorted(out, key=lambda b: -b["retry_after"])
+
+    def clear(self, ip: str, username: str | None = None) -> None:
+        """Lift a block: one (ip, username) pair, or with ``username=None`` everything from ``ip``."""
+        with self._lock:
+            for key in list(self._fails):
+                if key[0] == ip and (username is None or key[1] == username):
+                    del self._fails[key]
+
+    def clear_user(self, username: str) -> None:
+        """Forget the failures against one account (after an admin reset its password)."""
+        with self._lock:
+            for key in list(self._fails):
+                if key[1] in (username, "pw:" + username):
+                    del self._fails[key]

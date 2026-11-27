@@ -65,6 +65,24 @@ This prints a code like `HB3J-24PD-KENJ-S45G`. Send it to the person; it works
 once and expires after 7 days. They type it into the app with the name and
 password they choose.
 
+## Admin dashboard
+
+`https://<name>.duckdns.org:51820/admin` (any address of the server, followed by `/admin`). Sign in with an
+**admin** account (made with `create-admin`); other accounts are refused. It replaces most of the commands below:
+
+| Section | What you can do |
+|---|---|
+| Vue d'ensemble | what needs attention (unread messages, old backup, no restore drill this quarter, full disk, lockouts), counts, storage, server version and settings |
+| Comptes | every account with recipe/photo counts, devices, last activity and shares; rename, sign out one device or all, temporary password for someone who forgot theirs, grant/remove admin, delete an account |
+| Invitations | create a code with a ready-to-send message, see which codes were used and by whom, cancel a code |
+| Messages | the "Signaler un problème" reports with their log; mark read, delete |
+| Utilisation | the anonymous usage counters per week, least used first |
+| Système | last nightly backup (USB copy, off-site), snapshots on the server, "back up now", restore drill, lifting a login lockout |
+
+Recipe and photo content is never shown, only counts. Resetting a password, deleting an account and granting
+admin ask for your own password again. The nightly backup status comes from `DATA_DIR/backups/last-run.json`,
+written by `ops/backup-cron.sh`.
+
 ## Web version
 
 The server also serves the web version of the app at its root address, for example `https://<name>.duckdns.org/` (its files are under `/app/`). Nothing to install: open the address in a phone browser, log in, and use "Add to home screen" for an icon. It has the same accounts, sharing and conflict handling as the desktop app, but no PDF import and no offline use.

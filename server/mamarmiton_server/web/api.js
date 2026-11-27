@@ -55,7 +55,7 @@ function friendlyMessage(status, detail, retryAfter) {
   return "Une erreur est survenue.";
 }
 
-async function request(method, path, { json, form, auth = true, signal } = {}) {
+export async function request(method, path, { json, form, auth = true, signal } = {}) {
   const headers = { "X-Mamarmiton-Client": CLIENT_HEADER };
   const init = { method, headers, signal, cache: "no-store" };
   if (auth && currentToken()) headers.Authorization = `Bearer ${currentToken()}`;

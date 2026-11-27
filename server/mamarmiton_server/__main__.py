@@ -49,34 +49,19 @@ def usage_table(conn, days: int = 56, today: date | None = None) -> str:
     """Events x weeks, least used first. Weeks end today (the last column is the current 7 days)."""
     from mamarmiton_server import usage
 
-    today = today or date.today()
-    days = max(7, days)
-    weeks = (days + 6) // 7
-    start = today - timedelta(days=weeks * 7 - 1)
-    totals: dict[str, list[int]] = {e: [0] * weeks for e in usage.EVENTS}
-    used_days: dict[str, set[str]] = {e: set() for e in usage.EVENTS}
-    active = {kind: [0] * weeks for kind in (*usage.KINDS, "other")}
-    for row in conn.execute("SELECT day, client_kind, event, count FROM usage_daily WHERE day >= ? AND day <= ?",
-                            (start.isoformat(), today.isoformat())):
-        week = (date.fromisoformat(row["day"]) - start).days // 7
-        if row["event"] == usage.ACTIVE:
-            active.setdefault(row["client_kind"], [0] * weeks)[week] += row["count"]
-        elif row["event"] in totals:
-            totals[row["event"]][week] += row["count"]
-            used_days[row["event"]].add(row["day"])
-    heads = [(start + timedelta(days=7 * w)).strftime("%d/%m") for w in range(weeks)]
+    summary = usage.weekly_summary(conn, days, today)
+    start, end = date.fromisoformat(summary["start"]), date.fromisoformat(summary["end"])
+    heads = [date.fromisoformat(w).strftime("%d/%m") for w in summary["weeks"]]
     name_w = max(len(e) for e in usage.EVENTS)
-    lines = [f"Usage du {start:%d/%m/%Y} au {today:%d/%m/%Y} (semaines qui commencent le jour indiqué)", "",
+    lines = [f"Usage du {start:%d/%m/%Y} au {end:%d/%m/%Y} (semaines qui commencent le jour indiqué)", "",
              f"{'événement':<{name_w}}  " + " ".join(f"{h:>6}" for h in heads) + "   total  jours"]
-    order = sorted(usage.EVENTS, key=lambda e: (sum(totals[e]), len(used_days[e]), e))
-    for event in order:
-        lines.append(f"{event:<{name_w}}  " + " ".join(f"{n:>6}" for n in totals[event])
-                     + f"  {sum(totals[event]):>6}  {len(used_days[event]):>5}")
+    for row in summary["events"]:
+        lines.append(f"{row['event']:<{name_w}}  " + " ".join(f"{n:>6}" for n in row["counts"])
+                     + f"  {row['total']:>6}  {row['days']:>5}")
     lines += ["", "Appareils actifs (appareil-jours) :"]
-    for kind, counts in active.items():
-        if any(counts) or kind in usage.KINDS:
-            lines.append(f"{'actifs ' + kind:<{name_w}}  " + " ".join(f"{n:>6}" for n in counts)
-                         + f"  {sum(counts):>6}")
+    for kind, counts in summary["active"].items():
+        lines.append(f"{'actifs ' + kind:<{name_w}}  " + " ".join(f"{n:>6}" for n in counts)
+                     + f"  {sum(counts):>6}")
     return "\n".join(lines)
 
 
