@@ -151,6 +151,31 @@ def _draw_icon(name: str, color: str) -> Image.Image:
     elif name == "reset":
         d.arc(box(4.5, 4.5, 19.5, 19.5), 210, 140, fill=c, width=w)
         _stroke(d, pts((4.5, 4), (5, 9), (10, 8.5)), w, c)
+    elif name in ("cloud", "cloud_off"):
+        d.arc(box(3, 12, 10, 19), 90, 270, fill=c, width=w)
+        d.arc(box(6, 6, 16, 16), 165, 350, fill=c, width=w)
+        d.arc(box(13, 10, 21, 19), 270, 90, fill=c, width=w)
+        _stroke(d, pts((6.5, 19), (17.5, 19)), w, c)
+        _stroke(d, pts((6.5, 12), (7, 11.5)), w, c)
+        if name == "cloud_off":
+            _stroke(d, pts((4, 4), (20, 21)), w, c)
+    elif name == "alert":
+        _stroke(d, pts((12, 4), (21, 20), (3, 20), (12, 4)), w, c)
+        _stroke(d, pts((12, 10), (12, 14)), w, c)
+        r = 1.2 * s
+        d.ellipse((12 * s - r, 17 * s - r, 12 * s + r, 17 * s + r), fill=c)
+    elif name == "share":
+        _stroke(d, pts((7.5, 11), (16.5, 7)), w, c)
+        _stroke(d, pts((7.5, 13), (16.5, 17)), w, c)
+        for x, y in ((6, 12), (18, 6), (18, 18)):
+            r = 3 * s
+            d.ellipse((x * s - r, y * s - r, x * s + r, y * s + r), fill=c)
+    elif name == "eye":
+        _stroke(d, pts((3, 12), (8, 7), (16, 7), (21, 12), (16, 17), (8, 17), (3, 12)), w, c)
+        d.ellipse(box(9.5, 9.5, 14.5, 14.5), fill=c)
+    elif name == "copy":
+        d.rounded_rectangle(box(8, 8, 20, 20), radius=2.5 * s, outline=c, width=w)
+        _stroke(d, pts((16, 8), (16, 5), (4, 5), (4, 16), (8, 16)), w, c)
     elif name == "close":
         _stroke(d, pts((6, 6), (18, 18)), w, c)
         _stroke(d, pts((18, 6), (6, 18)), w, c)

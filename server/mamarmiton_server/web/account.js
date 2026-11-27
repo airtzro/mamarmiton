@@ -1,0 +1,97 @@
+import { api, token } from "./api.js";
+import { h, icon, clear } from "./dom.js";
+import { state } from "./state.js";
+import { busy, openDialog, toast } from "./ui.js";
+
+function field(label, input) {
+  const id = `a-${Math.random().toString(36).slice(2, 8)}`;
+  input.id = id;
+  return h("div", { class: "field" }, h("label", { for: id, text: label }), input);
+}
+
+/** "Mon compte": change password, invitation (admin), sign out. */
+export function openAccountDialog({ onSignOut }) {
+  openDialog({
+    title: "Mon compte",
+    build: (close) => {
+      const body = h("div", { class: "stack" });
+
+      function home() {
+        const signOut = h("button", { class: "btn btn-secondary btn-big", type: "button" }, icon("logout", 20), "Se déconnecter");
+        signOut.addEventListener("click", async () => {
+          await busy(signOut, async () => { try { await api.logout(); } catch { /* the token is dropped anyway */ } });
+          close();
+          onSignOut();
+        });
+        clear(body).append(
+          h("p", {}, "Connecté en tant que ", h("strong", { text: state.me.display_name || state.me.username }),
+            h("span", { class: "muted", text: ` (@${state.me.username})` })),
+          h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: passwordForm }, icon("key", 20), "Changer mon mot de passe"),
+          state.me.is_admin ? h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: inviteForm }, icon("plus", 20), "Créer une invitation") : null,
+          signOut);
+      }
+
+      function passwordForm() {
+        const old = h("input", { type: "password", autocomplete: "current-password", required: true });
+        const next = h("input", { type: "password", autocomplete: "new-password", required: true });
+        const again = h("input", { type: "password", autocomplete: "new-password", required: true });
+        const error = h("p", { class: "form-error", role: "alert" });
+        const save = h("button", { class: "btn btn-primary", type: "submit", text: "Changer le mot de passe" });
+        const form = h("form", { class: "stack", novalidate: true },
+          field("Mot de passe actuel", old), field("Nouveau mot de passe", next), field("Nouveau mot de passe (encore une fois)", again),
+          error,
+          h("div", { class: "row end wrap" }, h("button", { class: "btn btn-secondary", type: "button", onClick: home, text: "Retour" }), save));
+        form.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          if (!old.value || !next.value) { error.textContent = "Remplissez les trois champs."; return; }
+          if (next.value !== again.value) { error.textContent = "Les deux nouveaux mots de passe ne sont pas identiques."; return; }
+          await busy(save, async () => {
+            try { await api.changePassword(old.value, next.value); toast("Mot de passe changé. Vos autres appareils sont déconnectés.", "ok"); home(); }
+            catch (err) { error.textContent = err.message; }
+          });
+        });
+        clear(body).append(form);
+        old.focus();
+      }
+
+      function inviteForm(code) {
+        const note = h("input", { type: "text", maxlength: 100, placeholder: "ex. pour Tata Marie" });
+        const error = h("p", { class: "form-error", role: "alert" });
+        const create = h("button", { class: "btn btn-primary", type: "submit", text: "Créer l'invitation" });
+        const result = h("div", { class: "stack" });
+        const form = h("form", { class: "stack", novalidate: true },
+          h("p", { text: "Un code d'invitation permet à une personne de créer son compte. Il ne sert qu'une fois." }),
+          field("Pour qui ? (facultatif)", note), error,
+          h("div", { class: "row end wrap" }, h("button", { class: "btn btn-secondary", type: "button", onClick: home, text: "Retour" }), create), result);
+        form.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          await busy(create, async () => {
+            try {
+              const invite = await api.createInvite(note.value.trim());
+              const box = h("input", { type: "text", readOnly: true, value: invite.code, class: "code-box", "aria-label": "Code d'invitation" });
+              const copy = h("button", { class: "btn btn-secondary", type: "button" }, icon("copy", 18), "Copier");
+              copy.addEventListener("click", async () => {
+                try { await navigator.clipboard.writeText(invite.code); toast("Code copié.", "ok"); }
+                catch { box.select(); toast("Sélectionné : copiez-le avec le menu de votre téléphone.", "info"); }
+              });
+              const expires = new Date(invite.expires_at);
+              clear(result).append(h("h3", { class: "serif", text: "Code à donner" }),
+                h("div", { class: "row" }, box, copy),
+                h("p", { class: "muted", text: `Valable jusqu'au ${expires.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}.` }));
+              box.focus(); box.select();
+            } catch (err) { error.textContent = err.message; }
+          });
+        });
+        clear(body).append(form);
+        note.focus();
+      }
+
+      home();
+      return body;
+    },
+  });
+}
+
+export { token };

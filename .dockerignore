@@ -1,0 +1,10 @@
+# The server image only needs server/ and a few files of mamarmiton/ (see server/Dockerfile)
+*
+!server/pyproject.toml
+!server/mamarmiton_server/
+!pyproject.toml
+!README.md
+!mamarmiton/__init__.py
+!mamarmiton/models.py
+!mamarmiton/quantities.py
+**/__pycache__

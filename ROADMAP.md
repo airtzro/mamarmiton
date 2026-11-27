@@ -3,6 +3,16 @@
 Ordered by value for the main user (a non-technical cook on Windows) against effort.
 Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 
+## Next: sync follow-ups
+
+| Feature | Why | Effort |
+|---|---|---|
+| **Web offline cache** | The web page needs a connection today. Cache recipes the way the desktop app does. | M |
+| **Real-phone testing of the web page** | Check login, sync, sharing and add-to-home-screen on a real iPhone and Android phone. | S |
+| **PDF import on the web** | The web version cannot import PDFs yet. | M |
+| **Permanent router rule for port 443** | Public port 443 is not forwarded yet, so the web address needs a port (51820 today). | S |
+| **Backup cron on the NAS** | Schedule the server `backup` command and a copy of `DATA_DIR`, instead of doing it by hand. | S |
+
 ## Next: quick wins
 
 | Feature | Why | Effort |
@@ -33,7 +43,7 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 | Feature | Why | Effort |
 |---|---|---|
 | **SQLite storage** | Once there are more than ~1000 recipes, or if sync is added. Keep JSON export. | M |
-| **Sync between PCs / phone** | Simplest is pointing the data folder at a OneDrive/Syncthing folder (needs a file lock and conflict handling). Fuller option: a small web companion. | L |
+| ~~**Sync between PCs / phone**~~ | **Done**: desktop client sync with accounts, offline cache and conflict handling, plus a web version served by the NAS server. | ~~L~~ |
 | **Share a recipe** | Export one recipe as `.mamarmiton` (JSON + photos zipped) that another copy can import. | S–M |
 | **Installer** | An Inno Setup installer with Start-menu entry, uninstall, and the AI model downloaded on first use instead of shipped. | M |
 | **Nutrition estimate** | Map ingredients to the CIQUAL table (ANSES, open data) to estimate kcal per serving. | L |

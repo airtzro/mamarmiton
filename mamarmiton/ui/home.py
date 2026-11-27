@@ -215,7 +215,8 @@ class HomeView(ctk.CTkFrame):
         for recipe in recipes:
             photos = store.image_paths(recipe)
             card = RecipeCard(self.grid_area, recipe, photos[0] if photos else None, width,
-                              on_open=self.app.open_recipe, on_favorite=self.app.toggle_favorite)
+                              on_open=self.app.open_recipe, on_favorite=self.app.toggle_favorite,
+                              shared_by=self.app.sharer(recipe))
             self._cards.append(card)
         self._layout()
         self.grid_area._parent_canvas.yview_moveto(0)

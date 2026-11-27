@@ -19,3 +19,8 @@ recette.json
 recette_fav.json
 *.pdf
 !tests/fixtures/*.pdf
+
+# server
+server/.env
+server/.venv/
+server/data/

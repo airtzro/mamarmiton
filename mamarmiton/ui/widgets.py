@@ -190,7 +190,33 @@ class Modal(ctk.CTkToplevel):
             self.grab_release()
         except Exception:
             pass
+        parent = self.master
         self.destroy()
+        if isinstance(parent, Modal):  # give the grab back to the dialog we were opened from
+            try:
+                parent.after(50, parent._grab)
+            except Exception:
+                pass
+
+
+class IconLine(ctk.CTkFrame):
+    """An icon with a text that wraps beside it (a label with ``compound="left"`` wraps under the icon)."""
+
+    def __init__(self, master, font, size: int = 15, wraplength: int = 200, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.size = size
+        self.grid_columnconfigure(1, weight=1)
+        self.icon = ctk.CTkLabel(self, text="", width=size + 4)
+        self.icon.grid(row=0, column=0, sticky="n", padx=(0, 6), pady=(2, 0))
+        self.text = ctk.CTkLabel(self, text="", font=font, anchor="w", justify="left", wraplength=wraplength)
+        self.text.grid(row=0, column=1, sticky="ew")
+
+    def set(self, icon: str, text: str, color) -> None:
+        self.icon.configure(image=art.icon(icon, color, self.size))
+        self.text.configure(text=text, text_color=color)
+
+    def set_wrap(self, wraplength: int) -> None:
+        self.text.configure(wraplength=wraplength)
 
 
 class Choice(ctk.CTkFrame):
@@ -265,7 +291,7 @@ class RecipeCard(ctk.CTkFrame):
     RADIUS = 18
 
     def __init__(self, master, recipe: Recipe, photo: Path | None, width: int,
-                 on_open: Callable[[Recipe], None], on_favorite: Callable[[Recipe], None]):
+                 on_open: Callable[[Recipe], None], on_favorite: Callable[[Recipe], None], shared_by: str = ""):
         super().__init__(master, fg_color=theme.SURFACE, corner_radius=self.RADIUS, border_width=1,
                          border_color=theme.BORDER, width=width)
         self.recipe = recipe
@@ -293,11 +319,17 @@ class RecipeCard(ctk.CTkFrame):
         self.star.grid(row=0, column=1, sticky="ne")
 
         meta = ctk.CTkFrame(self, fg_color="transparent")
-        meta.grid(row=2, column=0, sticky="ew", padx=14, pady=(6, 16))
+        meta.grid(row=2, column=0, sticky="ew", padx=14, pady=(6, 16 if not shared_by else 4))
         if recipe.temps_total:
             self._meta(meta, "clock", format_minutes(recipe.temps_total))
         self._meta(meta, "users", f"{recipe.pour} pers.")
         self._meta(meta, "pot", recipe.type_cuisson)
+        self.shared = None
+        if shared_by:
+            self.shared = ctk.CTkLabel(self, text=f" Partagée par {shared_by}", image=art.icon("share", theme.ACCENT_TEXT, 14),
+                                       compound="left", font=theme.font(12, "bold"), text_color=theme.ACCENT_TEXT,
+                                       anchor="w", justify="left")
+            self.shared.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 14))
 
         self.set_width(width)
         skip = (self.star,)
@@ -321,6 +353,8 @@ class RecipeCard(ctk.CTkFrame):
                         bg=theme.BG)  # outside the card's rounded corner is the page
         self.banner.configure(image=img)
         self.title.configure(wraplength=width - 70)
+        if self.shared is not None:
+            self.shared.configure(wraplength=width - 36)
 
     def _clicked(self, _event=None) -> None:
         self._on_open(self.recipe)

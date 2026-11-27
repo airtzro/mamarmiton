@@ -8,6 +8,7 @@ dependencies = [
     "customtkinter>=5.2",
     "pdfplumber>=0.11",
     "pillow>=10",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,59 @@
+# Mamarmiton server for OpenMediaVault (compose plugin) or any Docker host.
+# 1. copy .env.example to .env and fill it in
+# 2. docker compose up -d --build
+# 3. docker compose exec api python -m mamarmiton_server create-admin <your-name>
+# See server/README.md for the router and DuckDNS steps.
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    # the owner of DATA_DIR on the NAS (OMV: your user's uid, group "users" = 100)
+    user: "${PUID:-1000}:${PGID:-100}"
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+    environment:
+      MAMARMITON_SERVER_DATA: /data
+    # no "ports:": only Caddy can reach the API (it trusts Caddy's X-Forwarded-For)
+    networks: [internal]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+
+  caddy:
+    build: ./caddy
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      # OMV's own web interface usually takes 80/443 on the NAS, so use another
+      # port here and forward the router's public 443 to it
+      - "${HTTPS_PORT:-8443}:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      DUCKDNS_TOKEN: ${DUCKDNS_TOKEN:?set DUCKDNS_TOKEN in .env}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data     # certificates
+      - caddy_config:/config
+    networks: [internal]
+    security_opt: ["no-new-privileges:true"]
+
+  # keeps <name>.duckdns.org pointing at the home's public IP
+  duckdns:
+    image: lscr.io/linuxserver/duckdns:latest
+    restart: unless-stopped
+    environment:
+      SUBDOMAINS: ${DUCKDNS_SUBDOMAIN:?set DUCKDNS_SUBDOMAIN in .env}
+      TOKEN: ${DUCKDNS_TOKEN}
+      TZ: ${TZ:-Europe/Paris}
+      LOG_FILE: "false"
+
+networks:
+  internal:
+
+volumes:
+  caddy_data:
+  caddy_config:

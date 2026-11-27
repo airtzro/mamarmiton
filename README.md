@@ -15,9 +15,20 @@ You can type recipes in by hand or import them from PDF files. A small AI model 
 - **Safe storage**: atomic writes, an automatic `.bak` copy, corrupt files are set aside instead of overwritten, plus JSON export and import for backups.
 - **Light and dark mode**, and three **text sizes** (Aide et réglages).
 
+## Account and sync (optional)
+
+Without an account, Mamarmiton works locally exactly as before. An account lets you use the same recipe books on several computers, and on a phone through the web version.
+
+- **Sign in**: click **Se connecter** in the sidebar. Log in with your name and password, or create an account with an invitation code from the admin. The default server is already set; to change it, open **Options avancées** in the login dialog.
+- **First login**: your local recipes are uploaded to the account. Your local `recette.json` is left untouched, so it stays a backup.
+- **Offline**: recipes are cached on the computer. Changes made without a connection wait in an outbox and are sent at the next sync. The sidebar shows the sync status.
+- **Sharing**: use **Partager** on one of your recipes to share it with another user. Recipes shared with you are read-only and marked **Lecture seule**. The account dialog lists the books shared with you.
+- **Conflicts**: if the same recipe was changed in two places, a dialog asks whether to keep your version, the other version, or both.
+- **Web version**: the same server serves a web page at its root address (for example `https://<name>.duckdns.org/`). It works in a phone browser and can be added to the home screen. It has no PDF import and no offline use.
+
 ## Running it
 
-Requires Python 3.11+ **with Tk**.
+Requires Python 3.11+ **with Tk**. Account sync uses [httpx](https://www.python-httpx.org/), installed with the package.
 
 ### Windows
 
@@ -64,7 +75,7 @@ If the model or `llama-cpp-python` is missing, imports still work with the rule-
 | Linux | `~/.local/share/recette_app/` (`$XDG_DATA_HOME`) |
 | any | `$MAMARMITON_DATA_DIR` if set |
 
-Inside: `recette.json` (the recipes), `recette.json.bak` (previous save), `images/<recipe id>/`, `settings.json`, `mamarmiton.log`.
+Inside: `recette.json` (the recipes), `recette.json.bak` (previous save), `images/<recipe id>/`, `settings.json`, `mamarmiton.log`, and for accounts `account.json` (chmod 600) plus `remote/<username>/` (offline cache and outbox).
 
 **Upgrading from v3** happens automatically on first launch:
 
@@ -100,8 +111,16 @@ mamarmiton/
     heuristic.py           rule-based recipe parser
     llm.py                 local LLM parser (llama-cpp)
     pipeline.py            PDF → Recipe: AI + rules, cross-checked
+  remote/
+    client.py              typed HTTP client for the server (httpx)
+    account.py             account.json: the signed-in account
+    store.py               RemoteStore: same methods as RecipeStore, offline cache, outbox, conflicts
   ui/
     app.py                 main window, category sidebar, actions
+    account.py             login, invitation code, account management dialog
+    sharing.py             share a recipe, books shared with me
+    conflicts.py           conflict dialog (keep mine / theirs / both)
+    remote_logic.py        background sync glue between the UI and RemoteStore
     home.py                greeting, search + filter bar, responsive card grid
     detail.py              recipe page: cover, key facts, servings calculator, tickable steps, photos
     dialogs.py             recipe editor, import progress, help & settings
@@ -111,12 +130,18 @@ mamarmiton/
 tests/                     pytest suite (no GUI needed)
 ```
 
-The UI only talks to `RecipeStore`, `search` and `importers`. Everything below `ui/` can be tested without a display.
+The UI only talks to `RecipeStore` (or `RemoteStore`, which has the same methods), `search` and `importers`. Everything below `ui/` can be tested without a display.
 
 ## Tests
 
 ```bash
 .venv/bin/python -m pytest
+```
+
+`tests/test_remote.py` tests the server client and needs the server's virtual environment, because it imports the server package:
+
+```bash
+cd server && .venv/bin/python -m pytest ../tests -q
 ```
 
 ## Keyboard shortcuts

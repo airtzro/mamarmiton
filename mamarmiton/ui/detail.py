@@ -3,6 +3,7 @@ numbered steps you can tick off while cooking, notes and photos."""
 
 from __future__ import annotations
 
+import json
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,7 @@ import customtkinter as ctk
 
 from mamarmiton.models import Recipe, format_minutes
 from mamarmiton.quantities import scale_quantity
-from mamarmiton.ui import art, theme
+from mamarmiton.ui import art, remote_logic as rl, theme
 from mamarmiton.ui.widgets import Modal, ScrollFrame, bind_tree, pointer_inside, set_cursor_tree
 
 if TYPE_CHECKING:
@@ -115,13 +116,14 @@ class DetailView(ctk.CTkFrame):
         self.btn_back.pack(side="left")
         self.btn_delete = theme.danger_button(bar, text="Supprimer", image=art.icon("trash", theme.DANGER, 17),
                                               compound="left", width=0, command=lambda: app.delete_recipe(self.recipe))
-        self.btn_delete.pack(side="right", padx=(8, 10))
         self.btn_edit = theme.primary_button(bar, text="Modifier", image=art.icon("pencil", theme.ON_ACCENT, 17),
                                              compound="left", width=0, command=lambda: app.edit_recipe(self.recipe))
-        self.btn_edit.pack(side="right", padx=(8, 0))
+        self.btn_share = theme.secondary_button(bar, text="Partager", image=art.icon("share", theme.TEXT, 17),
+                                                compound="left", width=0,
+                                                command=lambda: app.share_recipe(self.recipe))
         self.btn_fav = theme.secondary_button(bar, text="", width=0, compound="left",
                                               command=lambda: app.toggle_favorite(self.recipe))
-        self.btn_fav.pack(side="right")
+        self.signature: tuple | None = None
 
         self.body = ScrollFrame(self)
         self.body.grid(row=1, column=0, sticky="nsew", padx=(PAD - 14, 8), pady=(0, 8))
@@ -131,6 +133,13 @@ class DetailView(ctk.CTkFrame):
         self._compact = False
 
     # ------------------------------------------------------------------ api
+    def signature_of(self, recipe: Recipe) -> tuple:
+        """What the page displays, to skip a redraw when a sync changed nothing here."""
+        store = self.app.store
+        return (json.dumps(recipe.to_dict(), sort_keys=True), recipe.favori,
+                tuple(p.name for p in store.image_paths(recipe)), rl.can_edit(store, recipe.id),
+                rl.can_delete(store, recipe.id), self.app.owner_name(recipe))
+
     def show(self, recipe: Recipe) -> None:
         same = self.recipe is not None and self.recipe.id == recipe.id
         self.recipe = recipe
@@ -141,6 +150,8 @@ class DetailView(ctk.CTkFrame):
         self._wrapped = []
         self._mode = None
         self._built = False
+        self.signature = self.signature_of(recipe)
+        self._update_toolbar()
         self._update_fav_button()
 
         self._build_hero(recipe)
@@ -151,6 +162,22 @@ class DetailView(ctk.CTkFrame):
         self._rewrap()
         if not same:
             self.body._parent_canvas.yview_moveto(0)
+
+    def _update_toolbar(self) -> None:
+        """Show only the buttons this recipe's permissions allow."""
+        r, app = self.recipe, self.app
+        if r is None:
+            return
+        for button in (self.btn_delete, self.btn_edit, self.btn_share, self.btn_fav):
+            button.pack_forget()
+        can_delete, can_edit = app.can_delete(r), app.can_edit(r)
+        if can_delete:
+            self.btn_delete.pack(side="right", padx=(8, 10))
+        if can_edit:
+            self.btn_edit.pack(side="right", padx=(8, 0 if can_delete else 10))
+        if app.is_remote and app.is_owner(r):
+            self.btn_share.pack(side="right", padx=(8, 0))
+        self.btn_fav.pack(side="right", padx=(0, 0 if (can_edit or can_delete) else 10))
 
     def _update_fav_button(self) -> None:
         fav = bool(self.recipe and self.recipe.favori)
@@ -180,11 +207,20 @@ class DetailView(ctk.CTkFrame):
             side="left", padx=(0, 6))
         if r.favori:
             theme.chip(tags, "  Favori", fg=theme.NOTE_BG, image=art.icon("star", theme.STAR, 14),
-                       compound="left").pack(side="left")
+                       compound="left").pack(side="left", padx=(0, 6))
+        if not self.app.can_edit(r):  # on its own line: the tag row cannot wrap
+            theme.chip(info, "  Lecture seule", fg=theme.ACCENT_SOFT, text_color=theme.ACCENT_TEXT,
+                       image=art.icon("eye", theme.ACCENT_TEXT, 14), compound="left").pack(anchor="w", pady=(8, 0))
 
         title = theme.heading(info, r.nom, size=36, wraplength=560)
         title.pack(anchor="w", fill="x", pady=(14, 0))
         self._wrapped.append((title, "title"))
+        if self.app.is_remote and not self.app.is_owner(r):
+            owner = ctk.CTkLabel(info, text=f" Recette de {self.app.owner_name(r)}", font=theme.font(14, "bold"),
+                                 image=art.icon("share", theme.MUTED, 15), compound="left",
+                                 text_color=theme.MUTED, anchor="w", justify="left")
+            owner.pack(anchor="w", pady=(8, 0))
+            self._wrapped.append((owner, "title"))
         if r.source:
             ctk.CTkLabel(info, text=f"Importée depuis « {r.source} »", font=theme.font(13, slant="italic"),
                          text_color=theme.MUTED, anchor="w").pack(anchor="w", pady=(6, 0))
@@ -281,9 +317,12 @@ class DetailView(ctk.CTkFrame):
         if not r.etapes:
             ctk.CTkLabel(box, text="Aucune étape pour l'instant.", font=theme.font(14), text_color=theme.MUTED).pack(
                 anchor="w", padx=22)
-            theme.secondary_button(box, text="Ajouter les étapes", image=art.icon("pencil", theme.TEXT, 16),
-                                   compound="left", width=0, command=lambda: self.app.edit_recipe(r)).pack(
-                anchor="w", padx=22, pady=(12, 22))
+            if self.app.can_edit(r):
+                theme.secondary_button(box, text="Ajouter les étapes", image=art.icon("pencil", theme.TEXT, 16),
+                                       compound="left", width=0, command=lambda: self.app.edit_recipe(r)).pack(
+                    anchor="w", padx=22, pady=(12, 22))
+            else:
+                ctk.CTkFrame(box, fg_color="transparent", height=16).pack()
         else:
             steps = ctk.CTkFrame(box, fg_color="transparent")
             steps.pack(fill="x", padx=10, pady=(0, 14))
@@ -351,6 +390,7 @@ class DetailView(ctk.CTkFrame):
             return
         self._compact = compact
         self.btn_delete.configure(text="" if compact else "Supprimer")
+        self.btn_share.configure(text="" if compact else "Partager")
         self._update_fav_button()
 
     def _apply_layout(self, wide: bool, two_cols: bool, stacked: bool, width: int) -> None:
@@ -397,13 +437,16 @@ class DetailView(ctk.CTkFrame):
         head = ctk.CTkFrame(box, fg_color="transparent")
         head.pack(fill="x", padx=22, pady=(20, 10))
         theme.heading(head, "Photos", size=22).pack(side="left")
-        theme.secondary_button(head, text="Ajouter une photo", image=art.icon("photo", theme.TEXT, 17),
-                               compound="left", width=0, height=38,
-                               command=lambda: self.app.add_photo(r)).pack(side="right")
+        can_edit = self.app.can_edit(r)
+        if can_edit:
+            theme.secondary_button(head, text="Ajouter une photo", image=art.icon("photo", theme.TEXT, 17),
+                                   compound="left", width=0, height=38,
+                                   command=lambda: self.app.add_photo(r)).pack(side="right")
 
         paths = self.app.store.image_paths(r)
         if not paths:
-            hint = ctk.CTkLabel(box, text="Pas encore de photo. Ajoutez celle de votre plat, elle servira de couverture.",
+            hint = ctk.CTkLabel(box, text=("Pas encore de photo. Ajoutez celle de votre plat, elle servira de couverture."
+                                           if can_edit else "Pas de photo pour cette recette."),
                                 font=theme.font(14), text_color=theme.MUTED, justify="left", anchor="w")
             hint.pack(anchor="w", padx=22, pady=(0, 22))
             self._wrapped.append((hint, "full"))
@@ -446,7 +489,8 @@ class PhotoViewer(Modal):
         ctk.CTkLabel(self, text="", image=img).grid(row=0, column=0, padx=24, pady=(24, 12))
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 20))
-        theme.danger_button(row, text="Supprimer cette photo", image=art.icon("trash", theme.DANGER, 16),
-                            compound="left", width=0,
-                            command=lambda: (app.remove_photo(recipe, path.name), self.close())).pack(side="left")
+        if app.can_edit(recipe):
+            theme.danger_button(row, text="Supprimer cette photo", image=art.icon("trash", theme.DANGER, 16),
+                                compound="left", width=0,
+                                command=lambda: (app.remove_photo(recipe, path.name), self.close())).pack(side="left")
         theme.primary_button(row, text="Fermer", width=120, command=self.close).pack(side="right")

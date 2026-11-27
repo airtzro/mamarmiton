@@ -16,13 +16,16 @@ from mamarmiton.importers import ImportResult
 from mamarmiton.models import DISH_TYPES, Recipe
 from mamarmiton.search import Filters, search
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES, Settings
+from mamarmiton.remote import AuthError, OfflineError, RemoteStore, clear_account, open_store
 from mamarmiton.storage import RecipeStore
-from mamarmiton.ui import art, theme
+from mamarmiton.ui import art, remote_logic as rl, theme
+from mamarmiton.ui.account import AccountDialog
+from mamarmiton.ui.conflicts import ConflictDialog
 from mamarmiton.ui.detail import DetailView
 from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, ask_image, ask_pdf
 from mamarmiton.ui.editor import EditorView
 from mamarmiton.ui.home import HomeView
-from mamarmiton.ui.widgets import NavItem, fix_scaled_sizes, set_window_icon, use_portable_corners
+from mamarmiton.ui.widgets import IconLine, NavItem, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +53,10 @@ class Sidebar(ctk.CTkFrame):
         ctk.CTkLabel(words, text="Les recettes de la famille", font=theme.font(12), text_color=theme.SIDEBAR_MUTED,
                      anchor="w", height=18).pack(anchor="w")
 
+        # packed before the categories so a short window crops them, never the buttons and account area
+        bottom = ctk.CTkFrame(self, fg_color="transparent")
+        bottom.pack(side="bottom", fill="x", padx=16, pady=(0, 18))
+
         self.items: dict[str | None, NavItem] = {}
         self._nav(None, "Toutes les recettes", icon="grid")
         self._nav(FAVORITES, "Favoris", icon="star")
@@ -59,8 +66,6 @@ class Sidebar(ctk.CTkFrame):
         for dish in DISH_TYPES:
             self._nav(dish, PLURALS.get(dish, dish), dot=theme.dish(dish)["dot"])
 
-        bottom = ctk.CTkFrame(self, fg_color="transparent")
-        bottom.pack(side="bottom", fill="x", padx=16, pady=(0, 18))
         theme.primary_button(bottom, text="Nouvelle recette", image=art.icon("plus", theme.ON_ACCENT, 18),
                              compound="left", height=46, command=app.new_recipe).pack(fill="x")
         ctk.CTkButton(bottom, text="Importer un PDF", image=art.icon("pdf", theme.SIDEBAR_TEXT, 18), compound="left",
@@ -68,7 +73,7 @@ class Sidebar(ctk.CTkFrame):
                       border_width=1, border_color=theme.SIDEBAR_LINE, text_color=theme.SIDEBAR_TEXT,
                       font=theme.font(14, "bold"), command=app.import_pdf).pack(fill="x", pady=(8, 14))
         ctk.CTkFrame(bottom, height=1, fg_color=theme.SIDEBAR_LINE, corner_radius=0).pack(fill="x", pady=(0, 8))
-        help_row = ctk.CTkFrame(bottom, fg_color="transparent")
+        help_row = self._help_row = ctk.CTkFrame(bottom, fg_color="transparent")
         help_row.pack(fill="x")
         ctk.CTkButton(help_row, text="Aide et réglages", image=art.icon("settings", theme.SIDEBAR_MUTED, 17),
                       compound="left", anchor="w", height=38, corner_radius=10, fg_color="transparent",
@@ -76,8 +81,58 @@ class Sidebar(ctk.CTkFrame):
                       command=app.show_help).pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(help_row, text=f"v{__version__}", font=theme.font(11), text_color=theme.SIDEBAR_MUTED).pack(
             side="right", padx=(4, 6))
+        self._build_account_area(bottom)
 
         self._highlight()
+
+    def _build_account_area(self, parent) -> None:
+        app = self.app
+        # local mode: one button
+        self.btn_login = ctk.CTkButton(parent, text="Se connecter", image=art.icon("users", theme.SIDEBAR_TEXT, 18),
+                                       compound="left", anchor="w", height=40, corner_radius=10,
+                                       fg_color="transparent", hover_color=theme.SIDEBAR_HOVER,
+                                       text_color=theme.SIDEBAR_TEXT, font=theme.font(13), command=app.show_account)
+        # connected: name + sync button, then the status line
+        self.account_box = ctk.CTkFrame(parent, fg_color=theme.SIDEBAR_HOVER, corner_radius=12)
+        top = ctk.CTkFrame(self.account_box, fg_color="transparent")
+        top.pack(fill="x", padx=(12, 6), pady=(8, 0))
+        top.grid_columnconfigure(0, weight=1)
+        self.account_name = ctk.CTkLabel(top, text="", font=theme.font(14, "bold"), text_color=theme.SIDEBAR_TEXT,
+                                         anchor="w")
+        self.account_name.grid(row=0, column=0, sticky="ew")
+        self.btn_refresh = ctk.CTkButton(top, text="", width=30, height=30, corner_radius=15, fg_color="transparent",
+                                         hover_color=theme.SIDEBAR_ACTIVE, image=art.icon("reset", theme.SIDEBAR_MUTED, 16),
+                                         command=app.sync_now)
+        self.btn_refresh.grid(row=0, column=1)
+        self.account_status = IconLine(self.account_box, theme.font(12), size=15, wraplength=160)
+        self.account_status.pack(fill="x", padx=12, pady=(2, 10))
+        bind_tree(self.account_box, "<Button-1>", lambda _e: app.show_account(), skip=(self.btn_refresh,))
+        set_cursor_tree(self.account_box, "hand2", skip=(self.btn_refresh,))
+        self._account_mode: str | None = None
+        self.update_account()
+
+    STATUS_COLORS = {"ok": ("#5E8F4C", "#8DB87B"), "busy": theme.SIDEBAR_MUTED, "warn": ("#C9951A", "#E5B84C"),
+                     "bad": ("#C8553D", "#F2A283")}
+
+    def update_account(self) -> None:
+        """Show "Se connecter" (local mode) or the account name with its sync status."""
+        app = self.app
+        remote = app.is_remote
+        mode = "remote" if remote else "local"
+        if mode != self._account_mode:
+            self._account_mode = mode
+            self.btn_login.pack_forget()
+            self.account_box.pack_forget()
+            anchor = dict(fill="x", pady=(0, 6), before=self._help_row)
+            (self.account_box if remote else self.btn_login).pack(**anchor)
+        if not remote:
+            return
+        store = app.store
+        icon, text, kind = rl.status_line(store.status, store.pending_count, store.last_error)
+        color = self.STATUS_COLORS[kind]
+        self.account_name.configure(text=app.account.display_name or app.account.username)
+        self.account_status.set(icon, text, color)
+        self.btn_refresh.configure(state="disabled" if store.status == "syncing" else "normal")
 
     def _nav(self, key: str | None, text: str, icon: str | None = None, dot: str | None = None) -> None:
         item = NavItem(self, text, command=lambda: self.select(key), icon=icon, dot=dot)
@@ -124,7 +179,14 @@ class App(ctk.CTk):
         self.minsize(1000, 660)
         set_window_icon(self)
 
-        self.store = RecipeStore()
+        self.store, self.account = open_store()
+        self.people: dict[str, str] = {}  # username -> display name
+        self.account_dialog: AccountDialog | None = None
+        self._local: RecipeStore | None = None if self.account else self.store
+        self._conflict_dialog: ConflictDialog | None = None
+        self._snoozed: set[str] = set()  # conflicts postponed with "Décider plus tard"
+        self._fetching_people = False
+        self.runner = rl.SyncRunner(self, self.on_sync_done, on_state=self._update_account_area)
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -142,6 +204,7 @@ class App(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._quit)
 
         self.go_home()
+        self.runner.attach(self.store)
         if self.store.warnings:
             self.after(300, lambda: messagebox.showwarning("Attention", "\n\n".join(self.store.warnings), parent=self))
 
@@ -152,6 +215,8 @@ class App(ctk.CTk):
                 self.current.grid_forget()
             view.grid(row=0, column=1, sticky="nsew")
             self.current = view
+            if view is not self.editor and self.is_remote:
+                self.after(400, self._check_conflicts)
 
     def filters(self) -> Filters:
         f = self.home.filters()
@@ -222,10 +287,41 @@ class App(ctk.CTk):
         else:
             self.go_home()
 
+    # ------------------------------------------------------------ permissions
+    @property
+    def is_remote(self) -> bool:
+        return isinstance(self.store, RemoteStore)
+
+    def can_edit(self, recipe: Recipe | None) -> bool:
+        return recipe is None or rl.can_edit(self.store, recipe.id)
+
+    def can_delete(self, recipe: Recipe | None) -> bool:
+        return recipe is None or rl.can_delete(self.store, recipe.id)
+
+    def is_owner(self, recipe: Recipe) -> bool:
+        return rl.is_owner(self.store, recipe.id)
+
+    def owner_name(self, recipe: Recipe) -> str:
+        """Display name of the recipe's owner ("" in local mode)."""
+        return rl.person_name(self.people, rl.owner_of(self.store, recipe.id)) if self.is_remote else ""
+
+    def sharer(self, recipe: Recipe) -> str:
+        """Who shared this recipe with me ("" when it is mine)."""
+        return rl.sharer_label(self.store, recipe.id, self.people)
+
+    def _denied(self, exc: BaseException) -> None:
+        messagebox.showinfo("Action impossible", str(exc) or "Vous n'avez pas le droit de faire cela.", parent=self)
+
+    def _mutated(self) -> None:
+        """A change was made: sync soon, and show the pending count."""
+        self.runner.changed()
+        self._update_account_area()
+
     # ---------------------------------------------------------------- actions
     def new_recipe(self) -> None:
         def save(recipe: Recipe) -> None:
             self.store.add(recipe)
+            self._mutated()
             self.open_recipe(recipe)
 
         self._open_editor(None, save)
@@ -233,9 +329,16 @@ class App(ctk.CTk):
     def edit_recipe(self, recipe: Recipe | None) -> None:
         if recipe is None:
             return
+        if not self.can_edit(recipe):
+            return self._denied(PermissionError("Cette recette est en lecture seule : vous ne pouvez pas la modifier."))
 
         def save(updated: Recipe) -> None:
-            self.store.update(updated)
+            try:
+                self.store.update(updated)
+            except PermissionError as exc:
+                self._denied(exc)
+                return self.leave_editor()
+            self._mutated()
             self.open_recipe(updated)
 
         self._open_editor(recipe, save)
@@ -247,24 +350,44 @@ class App(ctk.CTk):
                                    f"Supprimer définitivement « {recipe.nom} » ?\nCette action est irréversible.",
                                    icon="warning", parent=self):
             return
-        self.store.delete(recipe.id)
+        try:
+            self.store.delete(recipe.id)
+        except PermissionError as exc:
+            return self._denied(exc)
+        self._mutated()
         self.go_home()
 
     def toggle_favorite(self, recipe: Recipe | None) -> None:
         if recipe is None:
             return
         self.store.toggle_favorite(recipe.id)
+        self._mutated()
         self.refresh(recipe)
 
     def add_photo(self, recipe: Recipe) -> None:
         path = ask_image(self)
         if path:
-            self.store.add_image(recipe, path)
+            try:
+                self.store.add_image(recipe, path)
+            except PermissionError as exc:
+                return self._denied(exc)
+            self._mutated()
             self.refresh(recipe)
 
     def remove_photo(self, recipe: Recipe, name: str) -> None:
-        self.store.remove_image(recipe, name)
+        try:
+            self.store.remove_image(recipe, name)
+        except PermissionError as exc:
+            return self._denied(exc)
+        self._mutated()
         self.refresh(recipe)
+
+    def share_recipe(self, recipe: Recipe | None) -> None:
+        if recipe is None or not self.is_remote:
+            return
+        from mamarmiton.ui.sharing import ShareDialog
+
+        ShareDialog(self, self, recipe)
 
     def import_pdf(self) -> None:
         if not self.can_leave_editor():
@@ -284,6 +407,7 @@ class App(ctk.CTk):
             for image in result.images:
                 self.store.add_image(recipe, image, save=False)
             self.store.save()
+            self._mutated()
             self._cleanup_import(result)
             self.open_recipe(recipe)
 
@@ -315,6 +439,7 @@ class App(ctk.CTk):
         except Exception as exc:
             messagebox.showerror("Import impossible", f"Fichier illisible :\n{exc}", parent=self)
             return
+        self._mutated()
         messagebox.showinfo("Import terminé", f"{count} nouvelle(s) recette(s) ajoutée(s).", parent=self)
         self.go_home()
 
@@ -333,7 +458,156 @@ class App(ctk.CTk):
         self.settings.use_ai = value
         self.settings.save()
 
+    # ---------------------------------------------------------- account & sync
+    def local_book(self) -> RecipeStore:
+        """The local recipe file (kept as a backup once an account is used)."""
+        if self._local is None:
+            self._local = RecipeStore()
+        return self._local
+
+    def show_account(self) -> None:
+        if self.account_dialog is not None and self.account_dialog.winfo_exists():
+            self.account_dialog.lift()
+            return
+        if not self.can_leave_editor():
+            return
+        self.account_dialog = AccountDialog(self, self)
+
+    def sign_in(self, client, account) -> None:
+        """Switch to the server-backed book for ``account`` (``client`` holds a fresh token)."""
+        old = self.store
+        self.runner.stop()
+        if self.is_remote and old.username == account.username:
+            old.client.token, old.client.user = client.token, client.user  # same book: just a new session
+            old.status = "ok"
+            old.last_error = ""
+        else:
+            if self.is_remote:
+                old.save()
+            self.store = RemoteStore(client, username=account.username)
+            if isinstance(old, RecipeStore):
+                self._local = old
+        self.account = account
+        self.people[account.username] = account.display_name or account.username
+        self.detail.recipe = None
+        self.go_home()
+        self.runner.attach(self.store)
+        self._update_account_area()
+
+    def sign_out(self) -> None:
+        """Back to the local book; the server session ends, the offline cache stays on disk."""
+        old = self.store
+        self.runner.stop()
+        if isinstance(old, RemoteStore):
+            old.save()
+            rl.run_in_thread(self, old.client.logout)  # best effort: the answer does not matter
+        clear_account()
+        self.account = None
+        self.store = self.local_book()
+        self.detail.recipe = None
+        self.go_home()
+        self._update_account_area()
+
+    def sync_now(self) -> None:
+        self.runner.sync_now()
+
+    def note_network_error(self, exc: BaseException) -> None:
+        """A dialog's own network call failed: reflect it in the sidebar status."""
+        if not self.is_remote or self.store.status == "syncing":
+            return
+        if isinstance(exc, AuthError):
+            self.store.status = "auth"
+        elif isinstance(exc, OfflineError):
+            self.store.status = "offline"
+        self._update_account_area()
+
+    def _update_account_area(self) -> None:
+        if not self.winfo_exists():
+            return
+        self.sidebar.update_account()
+        if self.account_dialog is not None and self.account_dialog.winfo_exists():
+            self.account_dialog.refresh_status()
+
+    def on_sync_done(self, result) -> None:
+        """A sync finished (called on the Tk thread)."""
+        self._update_account_area()
+        if isinstance(result, Exception):
+            log.error("Sync failed", exc_info=result)
+            return
+        if not self.is_remote or getattr(result, "skipped", False):
+            return
+        if result.changed:
+            self._refresh_after_sync()
+        self._fetch_people()
+        self._check_conflicts()
+
+    def _refresh_after_sync(self) -> None:
+        """Redraw what is on screen after new data arrived, without disturbing the editor."""
+        recipes = self.store.all()
+        self.sidebar.update_counts(recipes)
+        if self.current is self.home:
+            canvas = self.home.grid_area._parent_canvas
+            top = canvas.yview()[0]
+            self.go_home()
+            self.after_idle(lambda: canvas.yview_moveto(top))
+        elif self.current is self.detail and self.detail.recipe is not None:
+            fresh = self.store.get(self.detail.recipe.id)
+            if fresh is None:
+                messagebox.showinfo("Recette retirée", "Cette recette n'est plus disponible : elle a été "
+                                    "supprimée ou n'est plus partagée avec vous.", parent=self)
+                self.go_home()
+            elif self.detail.signature_of(fresh) != self.detail.signature:
+                self.detail.show(fresh)
+
+    def _fetch_people(self) -> None:
+        """Learn display names of recipe owners (for "partagée par ...")."""
+        if self._fetching_people or not rl.unknown_owners(self.store, self.people):
+            return
+        self._fetching_people = True
+        client = self.store.client
+
+        def done(users) -> None:
+            self._fetching_people = False
+            known = len(self.people)
+            self.people.update({u["username"]: u.get("display_name") or u["username"] for u in users})
+            if len(self.people) != known and self.current is self.home:
+                self._refresh_after_sync()
+
+        def failed(_exc) -> None:
+            self._fetching_people = False
+            self.people.update({u: u for u in {self.store.owner(r.id) for r in self.store.all()} if u not in self.people})
+
+        rl.run_in_thread(self, client.users, done, failed)
+
+    # ------------------------------------------------------------- conflicts
+    def _check_conflicts(self) -> None:
+        if (not self.is_remote or self._conflict_dialog is not None or self.current is self.editor
+                or self.account_dialog is not None):
+            return
+        for conflict in self.store.conflicts:
+            if conflict.recipe_id not in self._snoozed:
+                self._conflict_dialog = ConflictDialog(self, conflict, lambda choice, c=conflict: self._resolved(c, choice))
+                return
+
+    def _resolved(self, conflict, choice: str) -> None:
+        self._conflict_dialog = None
+        if choice == "later":
+            self._snoozed.add(conflict.recipe_id)
+        else:
+            try:
+                self.store.resolve_conflict(conflict.recipe_id, choice)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("Cannot resolve conflict")
+                messagebox.showerror("Recette", rl.error_text(exc), parent=self)
+            self._mutated()
+            self.sync_now()
+            self._refresh_after_sync()
+        self.after(300, self._check_conflicts)
+
     def _quit(self) -> None:
+        self.runner.stop()
+        if self.is_remote:
+            self.store.save()
         self.settings.save()
         self.destroy()
 
