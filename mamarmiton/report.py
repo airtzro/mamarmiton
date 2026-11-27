@@ -22,22 +22,7 @@ MAX_LOG_BYTES = 60 * 1024   # the server refuses more than 64 KB
 LOG_LINES = 200
 MAX_QUEUED = 5              # unsent reports kept on disk
 
-MASK = "[masqué]"
-_SECRET_WORDS = r"(?:password|passwd|mot de passe|mdp|token|secret|api[_-]?key|old_password|new_password|invite|code d'invitation)"
-_PATTERNS = [
-    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+"), rf"\1 {MASK}"),
-    (re.compile(r"(?i)(authorization[\"']?\s*[:=]\s*)[^\r\n]+"), rf"\1{MASK}"),
-    (re.compile(rf"(?i)\b({_SECRET_WORDS}[\"']?\s*[:=]\s*)(\"[^\"\r\n]*\"|'[^'\r\n]*'|[^\s,;&}}\]]+)"), rf"\1{MASK}"),
-    (re.compile(r"\b[A-Z2-9]{4}(?:-[A-Z2-9]{4}){3}\b"), MASK),            # invitation code
-    (re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{40,}(?![A-Za-z0-9_-])"), MASK),  # any long opaque token
-]
-
-
-def redact(text: str) -> str:
-    """Hide anything that looks like a bearer token, a password or an invitation code."""
-    for pattern, replacement in _PATTERNS:
-        text = pattern.sub(replacement, text or "")
-    return text
+from mamarmiton.redact import MASK, redact  # noqa: F401  (re-exported)
 
 
 def log_tail(path: Path | None = None, lines: int = LOG_LINES, max_bytes: int = MAX_LOG_BYTES) -> str:

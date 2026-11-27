@@ -16,7 +16,7 @@ RUN pip install ./server
 
 # only the recipe model of the desktop app, without its UI dependencies
 COPY pyproject.toml README.md ./
-COPY mamarmiton/__init__.py mamarmiton/models.py mamarmiton/quantities.py mamarmiton/
+COPY mamarmiton/__init__.py mamarmiton/models.py mamarmiton/quantities.py mamarmiton/redact.py mamarmiton/
 RUN pip install --no-deps . && rm -rf /app/server /app/mamarmiton /app/*.toml /app/*.md /app/build
 
 RUN mkdir -p /data

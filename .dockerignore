@@ -7,4 +7,5 @@
 !mamarmiton/__init__.py
 !mamarmiton/models.py
 !mamarmiton/quantities.py
+!mamarmiton/redact.py
 **/__pycache__

@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from mamarmiton.models import Recipe
-from mamarmiton.report import redact
+from mamarmiton.redact import redact
 from mamarmiton_server import __version__, db, images, security, usage
 from mamarmiton_server.config import Settings
 
