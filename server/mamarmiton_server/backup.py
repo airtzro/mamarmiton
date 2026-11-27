@@ -244,16 +244,65 @@ def _verify_dir(root: Path, rep: Report, deep: bool) -> dict | None:
     return manifest
 
 
+class _Response:
+    def __init__(self, status: int, body: bytes):
+        self.status_code, self.content = status, body
+
+    def json(self):
+        import json
+        return json.loads(self.content or b"null")
+
+
+class _AsgiClient:
+    """Minimal in-process GET client. The production image has no httpx, so TestClient can't be used here."""
+
+    def __init__(self, app):
+        self.app = app
+
+    def get(self, path: str, headers: dict | None = None) -> _Response:
+        import asyncio
+
+        path, _, query = path.partition("?")
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+                 "scheme": "http", "path": path, "raw_path": path.encode(), "query_string": query.encode(),
+                 "root_path": "", "server": ("drill", 80), "client": ("127.0.0.1", 0),
+                 "headers": [(b"host", b"drill")] + [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]}
+        status, chunks = [500], []
+
+        async def call():
+            done = asyncio.Event()
+            sent_request = False
+
+            async def receive():
+                nonlocal sent_request
+                if not sent_request:
+                    sent_request = True
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                await done.wait()  # file responses listen for the client leaving until the body is sent
+                return {"type": "http.disconnect"}
+
+            async def send(message):
+                if message["type"] == "http.response.start":
+                    status[0] = message["status"]
+                elif message["type"] == "http.response.body":
+                    chunks.append(message.get("body", b""))
+                    if not message.get("more_body", False):
+                        done.set()
+
+            await self.app(scope, receive, send)
+
+        asyncio.run(call())
+        return _Response(status[0], b"".join(chunks))
+
+
 def _drill_app(root: Path, rep: Report, tmp: Path) -> None:
     """Open the restored data with the real app and read a few recipes and a photo."""
-    from fastapi.testclient import TestClient
-
     from mamarmiton_server import db, security
     from mamarmiton_server.api import create_app
 
     data = tmp / "drill-data"
     shutil.copytree(root, data, ignore=shutil.ignore_patterns(MANIFEST))
-    client = TestClient(create_app(Settings(data_dir=data)))
+    client = _AsgiClient(create_app(Settings(data_dir=data)))
     health = client.get("/health")
     if health.status_code != 200:
         rep.problems.append(f"/health : {health.status_code}")

@@ -241,3 +241,17 @@ def test_retention_keeps_right_ones(tmp_path):
     # the newest of the day is kept, not the earlier one
     assert not (d / "mamarmiton-20261127-030000.tar.gz").exists()
     assert (d / "mamarmiton-20261127-150000.tar.gz").exists()
+
+
+def test_restore_check_works_without_httpx(populated, tmp_path):
+    """The production image has no httpx (TestClient needs it): the drill must not depend on it."""
+    import subprocess
+    import sys
+
+    archive, _ = snapshot(populated, tmp_path)
+    code = ("import sys; sys.modules['httpx'] = None; sys.modules['httpx2'] = None\n"
+            "from mamarmiton_server.__main__ import main\n"
+            f"sys.exit(main(['restore-check', {str(archive)!r}]))")
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "recettes lues" in result.stdout
