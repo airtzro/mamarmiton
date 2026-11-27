@@ -3,7 +3,7 @@
 [![tests](https://github.com/airtzro/mamarmiton/actions/workflows/tests.yml/badge.svg)](https://github.com/airtzro/mamarmiton/actions/workflows/tests.yml)
 
 A desktop recipe book (in French), built with Python and [customtkinter](https://github.com/TomSchimansky/CustomTkinter).
-You can type recipes in by hand or import them from PDF files. A small AI model runs **locally** to read the PDFs. Nothing is sent online.
+You can type recipes in by hand or import them from PDF files, photos, documents, web pages or pasted text. A small AI model runs **locally** to read them. No online AI service is ever used: when you are signed in, files can be read by your own Mamarmiton server instead.
 
 ## Features
 
@@ -13,7 +13,9 @@ You can type recipes in by hand or import them from PDF files. A small AI model 
 - **Servings calculator**: the −/+ buttons rescale every quantity (`1/2 sachet`, `2,5 kg`, `2-3 oeufs`, `une pincée`…) without changing the saved recipe.
 - **Ingredient tick-boxes** to keep track while cooking.
 - **Favourites** (★), **photos** per recipe, **notes**.
-- **PDF import**: the text is read by a local LLM (Qwen 2.5 1.5B) and cross-checked by a rule-based parser. You always **review the result** before it is saved. Photos from the PDF come along too. Scanned PDFs work through OCR if Tesseract is installed.
+- **Importer une recette** (one button): a PDF, photos of the pages, a text / Word / LibreOffice document, a web page, or pasted text. The text is read by a local LLM (Qwen 2.5 1.5B) and cross-checked by a rule-based parser. You always **review the result** before it is saved. Photos from the PDF come along too.
+  - Signed in, and the server offers it (`GET /import/status`): files and text go to the server, which reads photos with Tesseract and its own local AI.
+  - Otherwise, or if the server cannot be reached: PDFs, documents and text are read on the computer; photos and scanned PDFs need Tesseract installed locally (see below), else the app asks to sign in.
 - **Safe storage**: atomic writes, an automatic `.bak` copy, corrupt files are set aside instead of overwritten, plus JSON export and import for backups.
 - **Light and dark mode**, and three **text sizes** (Aide et réglages).
 
@@ -65,9 +67,9 @@ Download `qwen2.5-1.5b-instruct-q4_0.gguf` (about 1 GB, from the Qwen/Qwen2.5-1.
 
 If the model or `llama-cpp-python` is missing, imports still work with the rule-based parser. The Help window shows whether the AI is ready. On a typical laptop CPU an import takes about 15–60 s.
 
-### OCR for scanned PDFs (optional)
+### OCR for photos and scanned PDFs (optional)
 
-`pip install -e ".[ocr]"`, then install the [Tesseract](https://github.com/tesseract-ocr/tesseract) program with French data and [Poppler](https://poppler.freedesktop.org/).
+`pip install -e ".[ocr]"`, then install the [Tesseract](https://github.com/tesseract-ocr/tesseract) program with French data, and [Poppler](https://poppler.freedesktop.org/) for scanned PDFs. Without it, photos are read only through the server.
 
 ## Where the data lives
 
@@ -126,10 +128,12 @@ mamarmiton/
   search.py                filters and sorting (pure functions)
   settings.py              user preferences
   importers/
-    pdf_text.py            PDF text (+ OCR) and photo extraction
+    pdf_text.py            PDF text (+ OCR), photo extraction, reading photos (Tesseract)
+    documents.py           text of .txt / .docx / .odt files (standard library only)
     heuristic.py           rule-based recipe parser
     llm.py                 local LLM parser (llama-cpp)
-    pipeline.py            PDF → Recipe: AI + rules, cross-checked
+    pipeline.py            PDF, files or text → Recipe: AI + rules, cross-checked
+    web.py                 recipe web pages (schema.org data)
   remote/
     client.py              typed HTTP client for the server (httpx)
     account.py             account.json: the signed-in account
@@ -142,7 +146,9 @@ mamarmiton/
     remote_logic.py        background sync glue between the UI and RemoteStore
     home.py                greeting, search + filter bar, responsive card grid
     detail.py              recipe page: cover, key facts, servings calculator, tickable steps, photos
-    dialogs.py             recipe editor, import progress, help & settings
+    dialogs.py             web page import, help & settings, problem report
+    import_dialog.py       "Importer une recette": choose the source, wait for the reading
+    import_logic.py        where an import is read (server or this computer), server answer → draft
     widgets.py             recipe card, sidebar item, modal base
     art.py                 Pillow-drawn icons, generated cover art, rounded photos (light/dark)
     theme.py               design tokens (light/dark colours, fonts), styled widget factories

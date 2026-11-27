@@ -1,4 +1,7 @@
-"""Dialog windows: PDF import progress, help & settings."""
+"""Dialog windows: import from a website, help & settings, problem report.
+
+The "Importer une recette" dialog (files, photos, pasted text) is in ``import_dialog``.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +19,7 @@ from typing import TYPE_CHECKING, Callable
 import customtkinter as ctk
 
 from mamarmiton import __version__, config, report, updates, usage
-from mamarmiton.importers import ImportResult, import_pdf, import_url, llm, pdf_text
+from mamarmiton.importers import ImportResult, import_url, llm, pdf_text
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES
 from mamarmiton.ui import art, theme
 from mamarmiton.ui.remote_logic import error_text, run_in_thread
@@ -29,73 +32,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
-# PDF import with progress
-# --------------------------------------------------------------------------
-class ImportDialog(Modal):
-    def __init__(self, master, pdf_path: Path, use_ai: bool, on_done: Callable[[ImportResult], None]):
-        super().__init__(master, "Import d'un PDF", 520, 250)
-        self.resizable(False, False)
-        self.on_done = on_done
-        self.messages: queue.Queue = queue.Queue()
-
-        box = ctk.CTkFrame(self, fg_color="transparent")
-        box.pack(fill="both", expand=True, padx=30, pady=26)
-        top = ctk.CTkFrame(box, fg_color="transparent")
-        top.pack(fill="x")
-        ctk.CTkLabel(top, text="", width=52, height=52, corner_radius=16, fg_color=theme.ACCENT_SOFT,
-                     image=art.icon("pdf", theme.ACCENT_TEXT, 24)).pack(side="left")
-        words = ctk.CTkFrame(top, fg_color="transparent")
-        words.pack(side="left", fill="x", expand=True, padx=(16, 0))
-        theme.heading(words, "Lecture de la recette…", size=20).pack(anchor="w")
-        ctk.CTkLabel(words, text=pdf_path.name, font=theme.font(13), text_color=theme.MUTED, anchor="w",
-                     wraplength=360, justify="left").pack(anchor="w")
-        self.bar = ctk.CTkProgressBar(box, mode="indeterminate", height=8, corner_radius=4,
-                                      progress_color=theme.ACCENT, fg_color=theme.SURFACE_ALT)
-        self.bar.pack(fill="x", pady=(24, 10))
-        self.bar.start()
-        self.status = ctk.CTkLabel(box, text="Préparation…", font=theme.font(13), text_color=theme.MUTED, anchor="w")
-        self.status.pack(anchor="w")
-        ctk.CTkLabel(box, text="Cela peut prendre une minute. Vous pourrez tout vérifier ensuite.",
-                     font=theme.font(12), text_color=theme.FAINT, anchor="w").pack(anchor="w", pady=(2, 0))
-        self.protocol("WM_DELETE_WINDOW", lambda: None)  # cannot cancel a running native call
-        self.unbind("<Escape>")
-
-        def worker():
-            try:
-                result = import_pdf(pdf_path, use_llm=use_ai, progress=lambda m: self.messages.put(("progress", m)))
-                self.messages.put(("done", result))
-            except Exception as exc:
-                log.exception("PDF import failed")
-                self.messages.put(("error", exc))
-
-        threading.Thread(target=worker, daemon=True).start()
-        self.after(100, self._poll)
-
-    def _poll(self) -> None:
-        try:
-            while True:
-                kind, payload = self.messages.get_nowait()
-                if kind == "progress":
-                    self.status.configure(text=payload)
-                elif kind == "done":
-                    self.running = False
-                    self.bar.stop()
-                    self.close()
-                    self.on_done(payload)
-                    return
-                else:
-                    self.bar.stop()
-                    parent = self.master
-                    self.close()
-                    messagebox.showerror("Import impossible", str(payload), parent=parent)
-                    return
-        except queue.Empty:
-            pass
-        self.after(150, self._poll)
-
-
-# --------------------------------------------------------------------------
-# Import from a recipe website
+# Import from a recipe website ("Importer une recette" > "Une page internet")
 # --------------------------------------------------------------------------
 class UrlImportDialog(Modal):
     """Asks for a web address, then fetches it in a background thread."""
@@ -208,8 +145,8 @@ class UrlImportDialog(Modal):
 # --------------------------------------------------------------------------
 HELP_ITEMS = [
     ("plus", "Ajouter une recette", "Bouton « Nouvelle recette » en bas à gauche, ou Ctrl+N. Pour chaque ingrédient : le nom, la quantité, puis l'unité. Entrée passe à la case suivante ; Ctrl+S enregistre."),
-    ("pdf", "Importer un PDF", "L'application lit le PDF, puis vous montre la recette pour vérification avant de l'enregistrer."),
-    ("globe", "Importer depuis un site", "Collez l'adresse d'une page de recette : l'application la lit, puis vous la montre pour vérification."),
+    ("pdf", "Importer une recette", "Bouton « Importer une recette » en bas à gauche : un PDF, des photos des pages, un document, une page internet ou un texte copié. L'application lit la recette, puis vous la montre pour vérification avant de l'enregistrer."),
+    ("photo", "Lire une photo de recette", "Quand vous êtes connecté à votre compte, le serveur sait lire les photos (plusieurs pages possibles). Prenez-les bien droites, en pleine lumière."),
     ("search", "Retrouver une recette", "Tapez un mot dans la barre de recherche (Ctrl+F). Les catégories à gauche et les filtres affinent la liste."),
     ("pot", "Cuisiner avec ce qu'on a", "Écrivez vos ingrédients dans « J'ai dans le frigo » : seules les recettes qui les utilisent restent."),
     ("users", "Changer le nombre de personnes", "Boutons − et + sur la page d'une recette. Les quantités s'adaptent, la recette enregistrée ne change pas."),
@@ -295,7 +232,7 @@ class HelpDialog(Modal):
                            Choice(card, list(TEXT_SIZES), command=app.set_text_size, height=38), below=True)
         size.set(settings.text_size)
         ai_var = ctk.BooleanVar(value=settings.use_ai)
-        setting_row(3, "Lire les PDF avec l'IA", "Plus précis, mais un peu plus lent.",
+        setting_row(3, "Lire les recettes importées avec l'IA", "Plus précis, mais un peu plus lent.",
                     theme.switch(card, text="", variable=ai_var, width=50, command=lambda: app.set_use_ai(ai_var.get())))
         upd_var = ctk.BooleanVar(value=settings.check_updates)
         setting_row(4, "Vérifier les mises à jour", "Prévient quand une nouvelle version existe.",
@@ -366,9 +303,10 @@ class HelpDialog(Modal):
                           command=lambda: open_folder(config.data_dir())).pack(side="left")
 
         ai_status = "prête" if llm.is_available() else "indisponible (modèle ou llama-cpp manquant)"
-        ocr_status = "disponible" if pdf_text.ocr_available() else "indisponible (Tesseract non installé)"
+        ocr_status = "disponible" if pdf_text.tesseract_available() else "indisponible (Tesseract non installé)"
         info = (f"Version {__version__}  ·  Données : {config.data_dir()}\n"
-                f"IA de lecture des PDF : {ai_status}  ·  Lecture des scans (OCR) : {ocr_status}")
+                f"IA de lecture des recettes : {ai_status}  ·  Lecture des photos sur cet ordinateur (OCR) : "
+                f"{ocr_status}")
         label = ctk.CTkLabel(body, text=info, font=theme.font(11), text_color=theme.FAINT, justify="left", anchor="w",
                              wraplength=600)
         label.pack(anchor="w", padx=14, pady=(0, 12))
@@ -456,12 +394,6 @@ class ReportDialog(Modal):
             self.msg.configure(text=error_text(exc))
 
         run_in_thread(self, work, done, failed)
-
-
-def ask_pdf(parent) -> Path | None:
-    path = filedialog.askopenfilename(parent=parent, title="Choisir un PDF de recette",
-                                      filetypes=[("PDF", "*.pdf"), ("Tous les fichiers", "*.*")])
-    return Path(path) if path else None
 
 
 def ask_image(parent) -> Path | None:

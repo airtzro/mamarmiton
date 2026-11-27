@@ -19,13 +19,18 @@ DEBOUNCE_MS = 2_000
 
 
 # ------------------------------------------------------------------ status
-def status_line(status: str, pending: int = 0, error: str = "") -> tuple[str, str, str]:
-    """``(icon, text, kind)`` for the sidebar. ``kind`` is "ok", "busy", "warn" or "bad"."""
+def status_line(status: str, pending: int = 0, error: str = "", short: bool = False) -> tuple[str, str, str]:
+    """``(icon, text, kind)`` for the sidebar. ``kind`` is "ok", "busy", "warn" or "bad".
+
+    ``short`` keeps the offline line to one line (compact sidebar of a short window).
+    """
     if status == "syncing":
         return "reset", "Synchronisation…", "busy"
     if status == "offline":
         text = "Hors ligne"
-        if pending:
+        if pending and short:
+            text += f" · {pending} en attente"
+        elif pending:
             text += f" — vos changements seront envoyés plus tard ({pending} en attente)"
         return "cloud_off", text, "warn"
     if status == "outdated":

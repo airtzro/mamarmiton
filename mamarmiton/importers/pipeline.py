@@ -1,9 +1,10 @@
-"""PDF -> Recipe, combining the AI parser with the rule-based one."""
+"""PDF, documents, photos or text -> Recipe, combining the AI parser with the rule-based one."""
 
 from __future__ import annotations
 
 import logging
 import re
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,8 +25,9 @@ Progress = Callable[[str], None]
 class ImportResult:
     recipe: Recipe
     images: list[Path] = field(default_factory=list)  # temporary files, copy them before use
-    method: str = "règles"  # "IA" or "règles"
+    method: str = "règles"  # "IA", "règles" or "site"
     warnings: list[str] = field(default_factory=list)
+    origin: str = ""  # where the photos come from, for "N photo(s) trouvée(s) dans …" ("" = the PDF / the site)
 
 
 def clean_ai_ingredients(recipe: Recipe) -> None:
@@ -109,21 +111,12 @@ def merge(ai: Recipe, rules: Recipe, source: str = "") -> Recipe:
     return ai
 
 
-def import_pdf(path: Path, use_llm: bool = True, progress: Progress | None = None) -> ImportResult:
-    path = Path(path)
-    if not path.is_file():
-        raise FileNotFoundError(path)
+def recipe_from_text(text: str, use_llm: bool = True,
+                     progress: Progress | None = None) -> tuple[Recipe, str, list[str]]:
+    """Any recipe text -> ``(recipe, method, warnings)``: the rule-based parser, then the local AI
+    (when installed and wanted) checked against the text and completed by the rules."""
     report = progress or (lambda _msg: None)
     warnings: list[str] = []
-
-    report("Lecture du PDF…")
-    text = pdf_text.extract_text(path)
-    if not text.strip():
-        raise ValueError(
-            "Aucun texte trouvé dans ce PDF. S'il s'agit d'un scan, installez Tesseract "
-            "pour activer la reconnaissance de texte (voir le README)."
-        )
-
     rules = heuristic.parse_recipe_text(text)
     recipe = rules
     method = "règles"
@@ -142,14 +135,116 @@ def import_pdf(path: Path, use_llm: bool = True, progress: Progress | None = Non
             warnings.append(f"L'IA a échoué ({exc}) ; analyse simple utilisée.")
     elif use_llm:
         warnings.append("Modèle IA introuvable : analyse simple utilisée. Vérifiez bien la recette.")
+    return recipe, method, warnings
 
+
+def import_pdf(path: Path, use_llm: bool = True, progress: Progress | None = None) -> ImportResult:
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    report = progress or (lambda _msg: None)
+
+    report("Lecture du PDF…")
+    text = pdf_text.extract_text(path)
+    if not text.strip():
+        raise ValueError(NO_TEXT_IN_PDF)
+    recipe, method, warnings = recipe_from_text(text, use_llm, report)
+    images = _pdf_images(path, report)
+    recipe.source = path.name
+    return ImportResult(recipe=recipe, images=images, method=method, warnings=warnings)
+
+
+NO_TEXT_IN_PDF = ("Aucun texte trouvé dans ce PDF. S'il s'agit d'un scan, installez Tesseract "
+                  "pour activer la reconnaissance de texte (voir le README).")
+
+# --------------------------------------------------------------------------
+# Several files (pages of one recipe), text documents, photos, pasted text
+# --------------------------------------------------------------------------
+PDF_EXTENSIONS = {".pdf"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif", ".bmp", ".tif", ".tiff"}
+DOCUMENT_EXTENSIONS = {".txt", ".docx", ".odt"}
+
+
+def kind_of(path: Path | str) -> str | None:
+    """"pdf", "image", "document" (text, Word, LibreOffice) or None when the file is not supported."""
+    ext = Path(path).suffix.lower()
+    if ext in PDF_EXTENSIONS:
+        return "pdf"
+    if ext in IMAGE_EXTENSIONS:
+        return "image"
+    if ext in DOCUMENT_EXTENSIONS:
+        return "document"
+    return None
+
+
+def document_text(path: Path) -> str:
+    from mamarmiton.importers import documents
+
+    data = Path(path).read_bytes()
+    ext = Path(path).suffix.lower()
+    if ext == ".docx":
+        return documents.docx_text(data)
+    if ext == ".odt":
+        return documents.odt_text(data)
+    return documents.plain_text(data)
+
+
+def _pdf_images(path: Path, report: Progress) -> list[Path]:
     report("Extraction des photos…")
-    images: list[Path] = []
     try:
-        tmp = Path(tempfile.mkdtemp(prefix="mamarmiton_"))
-        images = pdf_text.extract_images(path, tmp)
+        return pdf_text.extract_images(path, Path(tempfile.mkdtemp(prefix="mamarmiton_")))
     except Exception:
         log.exception("Image extraction failed")
+        return []
 
-    recipe.source = path.name
+
+def import_text(text: str, use_llm: bool = True, progress: Progress | None = None,
+                source: str = "") -> ImportResult:
+    """Pasted text (or text read from documents) -> recipe."""
+    if not text.strip():
+        raise ValueError("Le texte est vide : collez d'abord la recette.")
+    recipe, method, warnings = recipe_from_text(text, use_llm, progress)
+    recipe.source = source
+    return ImportResult(recipe=recipe, method=method, warnings=warnings)
+
+
+def import_files(paths: list[Path], use_llm: bool = True, progress: Progress | None = None,
+                 text: str = "") -> ImportResult:
+    """Several files that make one recipe (e.g. the pages of a scan), plus optional pasted text.
+
+    Photos are read with Tesseract, so call this with photos only when ``tesseract_available()``.
+    The photos found in PDFs are kept; the photos given as files are pages, not dish photos.
+    """
+    report = progress or (lambda _msg: None)
+    parts: list[str] = []
+    images: list[Path] = []
+    for n, path in enumerate(paths, 1):
+        path = Path(path)
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        kind = kind_of(path)
+        page = f" ({n}/{len(paths)})" if len(paths) > 1 else ""
+        if kind == "pdf":
+            report(f"Lecture du PDF{page}…")
+            parts.append(pdf_text.extract_text(path))
+            images += _pdf_images(path, report)
+        elif kind == "image":
+            report(f"Lecture de la photo{page}…")
+            parts.append(pdf_text.ocr_image(path))
+        elif kind == "document":
+            report(f"Lecture du document{page}…")
+            parts.append(document_text(path))
+        else:
+            raise ValueError(f"« {path.name} » n'est pas un format accepté.")
+    if text.strip():
+        parts.append(text)
+    full = "\n\n".join(p.strip() for p in parts if p and p.strip())
+    if not full:
+        for folder in {p.parent for p in images}:
+            shutil.rmtree(folder, ignore_errors=True)
+        if all(kind_of(p) == "pdf" for p in paths):
+            raise ValueError(NO_TEXT_IN_PDF)
+        raise ValueError("Aucun texte n'a pu être lu. Pour une photo, prenez-la bien droite, en pleine lumière.")
+    recipe, method, warnings = recipe_from_text(full, use_llm, report)
+    recipe.source = Path(paths[0]).name if paths else ""
     return ImportResult(recipe=recipe, images=images, method=method, warnings=warnings)
