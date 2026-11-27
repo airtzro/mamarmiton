@@ -82,15 +82,51 @@ class ScrollFrame(ctk.CTkScrollableFrame):
 
     Tk 9 sends <MouseWheel> on X11, but customtkinter only listens to the
     old Button-4/5 events there, so the wheel did nothing.
+
+    ``autohide=True`` (vertical only) shows the scrollbar only while the
+    content is taller than the frame, and keeps the content at the top otherwise.
     """
 
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, autohide: bool = False, **kwargs):
         opts = dict(fg_color="transparent", corner_radius=0, scrollbar_button_color=theme.BORDER,
                     scrollbar_button_hover_color=theme.BORDER_STRONG)
         opts.update(kwargs)
         super().__init__(master, **opts)
         if sys.platform.startswith("linux"):
             self._wheel_id = self.bind_all("<MouseWheel>", self._linux_wheel, add=True)
+        self._autohide_pending = None
+        if autohide:
+            self._scrollbar.grid_remove()
+            self.bind("<Configure>", self._queue_autohide)  # forced to add: the scroll region keeps updating
+            self._parent_canvas.bind("<Configure>", self._queue_autohide, add="+")
+
+    def _queue_autohide(self, _event=None) -> None:
+        if self._autohide_pending is None:
+            self._autohide_pending = self.after_idle(self._autohide)
+
+    def _autohide(self) -> None:
+        self._autohide_pending = None
+        try:
+            if not self.winfo_exists():
+                return
+            canvas = self._parent_canvas
+            overflow = self.winfo_reqheight() > canvas.winfo_height() + 1
+            if overflow and not self._scrollbar.winfo_ismapped():
+                self._scrollbar.grid()
+            elif not overflow:
+                if self._scrollbar.winfo_ismapped():
+                    self._scrollbar.grid_remove()
+                canvas.yview_moveto(0)
+        except Exception:  # destroyed meanwhile
+            pass
+
+    def destroy(self):
+        if self._autohide_pending is not None:
+            try:
+                self.after_cancel(self._autohide_pending)
+            except Exception:
+                pass
+        super().destroy()
 
     def bind(self, sequence=None, func=None, add=None):
         # customtkinter updates the scroll region from this frame's own
@@ -616,8 +652,11 @@ class RecipeCard(ctk.CTkFrame):
 class NavItem(ctk.CTkFrame):
     """A sidebar entry: optional icon or colour dot, label, and a count on the right."""
 
+    HEIGHT = 42
+    COMPACT_HEIGHT = 34  # short windows (still a 44 px target at the "Très grande" text size)
+
     def __init__(self, master, text: str, command: Callable[[], None], icon: str | None = None,
-                 dot: str | None = None, height: int = 42):
+                 dot: str | None = None, height: int = HEIGHT):
         super().__init__(master, fg_color="transparent", corner_radius=10, height=height)
         self.command = command
         self.active = False
@@ -639,6 +678,10 @@ class NavItem(ctk.CTkFrame):
         bind_tree(self, "<Enter>", lambda _e: self._paint(hover=True))
         bind_tree(self, "<Leave>", lambda _e: self.after(20, lambda: self._paint(hover=pointer_inside(self))))
         set_cursor_tree(self, "hand2")
+
+    def set_height(self, height: int) -> None:
+        self.configure(height=height)
+        self.icon.grid_configure(pady=10 if height >= 40 else 6)
 
     def set_count(self, n: int | None) -> None:
         self.count.configure(text="" if n is None else str(n))

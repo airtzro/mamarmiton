@@ -54,10 +54,15 @@ class Sidebar(ctk.CTkFrame):
         self.category: str | None = None  # None = all, FAVORITES, or a dish type
         self.grid_propagate(False)
         self.pack_propagate(False)
+        self.narrow = False
+        self.compact = False
+        self._full_need: float | None = None  # height the full layout needs (see _fit)
+        self._fitting = False
 
-        brand = ctk.CTkFrame(self, fg_color="transparent")
+        self.brand = brand = ctk.CTkFrame(self, fg_color="transparent")
         brand.pack(fill="x", padx=20, pady=(26, 22))
-        ctk.CTkLabel(brand, text="", image=art.logo(44)).pack(side="left")
+        self.logo = ctk.CTkLabel(brand, text="", image=art.logo(44))
+        self.logo.pack(side="left")
         words = ctk.CTkFrame(brand, fg_color="transparent")
         words.pack(side="left", padx=(12, 0))
         ctk.CTkLabel(words, text="Mamarmiton", font=theme.serif(21), text_color=theme.SIDEBAR_TEXT,
@@ -65,11 +70,18 @@ class Sidebar(ctk.CTkFrame):
         self.tagline = ctk.CTkLabel(words, text="Les recettes de la famille", font=theme.font(12),
                                     text_color=theme.SIDEBAR_MUTED, anchor="w", height=18)
         self.tagline.pack(anchor="w")
-        self.narrow = False
 
-        # packed before the categories so a short window crops them, never the buttons and account area
-        bottom = ctk.CTkFrame(self, fg_color="transparent")
-        bottom.pack(side="bottom", fill="x", padx=16, pady=(0, 18))
+        # The actions and the account area are packed first so they always stay whole. The navigation
+        # fills what is left: a short window switches to the compact layout (set_compact), and if even
+        # that is too tall the navigation scrolls. The tags come last, so they are the first to go out
+        # of view; the categories stay as long as possible.
+        self.bottom = bottom = ctk.CTkFrame(self, fg_color="transparent")
+        bottom.pack(side="bottom", fill="x", padx=16, pady=(8, 18))
+        self.middle = ScrollFrame(self, autohide=True, width=0, height=0, scrollbar_button_color=theme.BORDER_STRONG,
+                                  scrollbar_button_hover_color=theme.SIDEBAR_MUTED)
+        self.middle.pack(fill="both", expand=True, padx=(12, 4))
+        self.middle._scrollbar.configure(width=10)  # thin: the labels keep their room when it shows
+        self.middle._parent_canvas.bind("<Configure>", self._fit, add="+")  # window height or bottom area changed
 
         self.items: dict[str | None, NavItem] = {}
         self._nav(None, "Toutes les recettes", icon="grid")
@@ -79,25 +91,30 @@ class Sidebar(ctk.CTkFrame):
         self.tags_expanded = False
         self._tags_signature = None
 
-        ctk.CTkLabel(self, text="Catégories", font=theme.font(13, "bold"), text_color=theme.SIDEBAR_MUTED,
-                     anchor="w").pack(fill="x", padx=26, pady=(22, 4))
+        self.categories_label = ctk.CTkLabel(self.middle, text="Catégories", font=theme.font(13, "bold"),
+                                             text_color=theme.SIDEBAR_MUTED, anchor="w")
+        self.categories_label.pack(fill="x", padx=14, pady=(22, 4))
         for dish in DISH_TYPES:
             self._nav(dish, PLURALS.get(dish, dish), dot=theme.dish(dish)["dot"])
-        self.tag_box = ctk.CTkFrame(self, fg_color="transparent")  # filled and packed by update_tags
+        self.tag_box = ctk.CTkFrame(self.middle, fg_color="transparent")  # filled and packed by update_tags
 
-        theme.primary_button(bottom, text="Nouvelle recette", image=art.icon("plus", theme.ON_ACCENT, 18),
-                             compound="left", height=46, command=app.new_recipe).pack(fill="x")
-        ctk.CTkButton(bottom, text="Importer un PDF", image=art.icon("pdf", theme.SIDEBAR_TEXT, 18), compound="left",
-                      height=44, corner_radius=theme.RADIUS, fg_color="transparent", hover_color=theme.SIDEBAR_HOVER,
-                      border_width=1, border_color=theme.SIDEBAR_LINE, text_color=theme.SIDEBAR_TEXT,
-                      font=theme.font(14, "bold"), command=app.import_pdf).pack(fill="x", pady=(8, 0))
-        self.btn_import_url = ctk.CTkButton(
-            bottom, text="Importer depuis un site", image=art.icon("globe", theme.SIDEBAR_TEXT, 18),
+        self.btn_new = theme.primary_button(bottom, text="Nouvelle recette", image=art.icon("plus", theme.ON_ACCENT, 18),
+                                            compound="left", height=46, command=app.new_recipe)
+        self.btn_new.pack(fill="x")
+        self.btn_import = ctk.CTkButton(
+            bottom, text="Importer une recette", image=art.icon("pdf", theme.SIDEBAR_TEXT, 18),
             compound="left", height=44, corner_radius=theme.RADIUS, fg_color="transparent",
             hover_color=theme.SIDEBAR_HOVER, border_width=1, border_color=theme.SIDEBAR_LINE,
-            text_color=theme.SIDEBAR_TEXT, font=theme.font(14, "bold"), command=app.import_url)
-        self.btn_import_url.pack(fill="x", pady=(8, 14))
-        ctk.CTkFrame(bottom, height=1, fg_color=theme.SIDEBAR_LINE, corner_radius=0).pack(fill="x", pady=(0, 8))
+            text_color=theme.SIDEBAR_TEXT, font=theme.font(14, "bold"), command=app.import_recipe)
+        self.btn_import.pack(fill="x", pady=(8, 14))
+        self.separator = ctk.CTkFrame(bottom, height=1, fg_color=theme.SIDEBAR_LINE, corner_radius=0)
+        self.separator.pack(fill="x", pady=(0, 8))
+        # "Se connecter" or the account box; in compact mode the settings button sits beside it
+        self.account_row = ctk.CTkFrame(bottom, fg_color="transparent")
+        self.account_row.pack(fill="x", pady=(0, 6))
+        self.btn_help_small = ctk.CTkButton(
+            self.account_row, text="", width=40, height=40, corner_radius=10, fg_color="transparent",
+            hover_color=theme.SIDEBAR_HOVER, image=art.icon("settings", theme.SIDEBAR_MUTED, 18), command=app.show_help)
         help_row = self._help_row = ctk.CTkFrame(bottom, fg_color="transparent")
         help_row.pack(fill="x")
         ctk.CTkButton(help_row, text="Aide et réglages", image=art.icon("settings", theme.SIDEBAR_MUTED, 17),
@@ -106,7 +123,7 @@ class Sidebar(ctk.CTkFrame):
                       command=app.show_help).pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(help_row, text=f"v{__version__}", font=theme.font(11), text_color=theme.SIDEBAR_MUTED).pack(
             side="right", padx=(4, 6))
-        self._build_account_area(bottom)
+        self._build_account_area(self.account_row)
 
         self._highlight()
 
@@ -115,12 +132,74 @@ class Sidebar(ctk.CTkFrame):
             return
         self.narrow = narrow
         self.configure(width=self.NARROW_WIDTH if narrow else self.WIDTH)
-        if narrow:
+        self._show_tagline()
+        self.items[None].label.configure(text="Toutes" if narrow else "Toutes les recettes")
+        self.items[SHOPPING].label.configure(text="Courses" if narrow else "Liste de courses")
+
+    def _fit(self, _event=None) -> None:
+        """Use the compact layout when the full one would push a category below the visible area.
+
+        The need is measured on the full layout, in unscaled pixels so a text size change keeps it.
+        It is only measured there: the compact layout keeps the last value, so the two cannot flip.
+        """
+        if self._fitting or not self.winfo_ismapped():
+            return
+        scaling = ctk.ScalingTracker.get_widget_scaling(self)
+        if not self.compact:
+            last = self.items[DISH_TYPES[-1]]
+            if last.winfo_height() <= 1:  # not laid out yet
+                return
+            outside = self.winfo_height() - self.middle._parent_canvas.winfo_height()
+            self._full_need = (outside + last.winfo_y() + last.winfo_height()) / scaling
+        if self._full_need is None:
+            return
+        self._fitting = True
+        try:
+            self.set_compact(self.winfo_height() / scaling < self._full_need)
+        finally:
+            self._fitting = False
+
+    def set_compact(self, compact: bool) -> None:
+        """Short window: tighter spacing, so the four categories stay visible without scrolling."""
+        if compact == self.compact:
+            return
+        self.compact = compact
+        self.brand.pack_configure(pady=(14, 8) if compact else (26, 22))
+        self.logo.configure(image=art.logo(36 if compact else 44))
+        self._show_tagline()
+        for item in self.items.values():
+            item.set_height(NavItem.COMPACT_HEIGHT if compact else NavItem.HEIGHT)
+        self.categories_label.pack_configure(pady=(8, 2) if compact else (22, 4))
+        self.bottom.pack_configure(pady=(6, 10) if compact else (8, 18))
+        self.btn_new.configure(height=42 if compact else 46)
+        self.btn_import.configure(height=40 if compact else 44)
+        self.btn_import.pack_configure(pady=(6, 8) if compact else (8, 14))
+        self.separator.pack_configure(pady=(0, 6) if compact else (0, 8))
+        self.account_row.pack_configure(pady=(0, 0) if compact else (0, 6))
+        self._place_help()
+        self.update_account()
+        if hasattr(self.app, "home"):  # the tag rows follow the item height
+            self._tags_signature = None
+            self.update_tags(self.app.store.all())
+
+    def _place_help(self) -> None:
+        """"Aide et réglages" is a row of its own, or (compact) a settings button beside the account."""
+        self.btn_help_small.pack_forget()
+        self.btn_help_box.grid_remove()
+        if not self.compact:
+            self._help_row.pack(fill="x", after=self.account_row)
+            return
+        self._help_row.pack_forget()
+        if self._account_mode == "remote":  # inside the account box, so its status keeps the full width
+            self.btn_help_box.grid()
+        else:
+            self.btn_help_small.pack(side="right", padx=(6, 0), before=self.btn_login)
+
+    def _show_tagline(self) -> None:
+        if self.narrow or self.compact:
             self.tagline.pack_forget()
         else:
             self.tagline.pack(anchor="w")
-        self.btn_import_url.configure(text="Importer d'un site" if narrow else "Importer depuis un site")
-        self.items[None].label.configure(text="Toutes" if narrow else "Toutes les recettes")
 
     def _build_account_area(self, parent) -> None:
         app = self.app
@@ -141,10 +220,16 @@ class Sidebar(ctk.CTkFrame):
                                          hover_color=theme.SIDEBAR_ACTIVE, image=art.icon("reset", theme.SIDEBAR_MUTED, 16),
                                          command=app.sync_now)
         self.btn_refresh.grid(row=0, column=1)
+        self.btn_help_box = ctk.CTkButton(top, text="", width=30, height=30, corner_radius=15, fg_color="transparent",
+                                          hover_color=theme.SIDEBAR_ACTIVE,
+                                          image=art.icon("settings", theme.SIDEBAR_MUTED, 16), command=app.show_help)
+        self.btn_help_box.grid(row=0, column=2)
+        self.btn_help_box.grid_remove()  # compact layout only
         self.account_status = IconLine(self.account_box, theme.font(12), size=15, wraplength=160)
         self.account_status.pack(fill="x", padx=12, pady=(2, 10))
-        bind_tree(self.account_box, "<Button-1>", lambda _e: app.show_account(), skip=(self.btn_refresh,))
-        set_cursor_tree(self.account_box, "hand2", skip=(self.btn_refresh,))
+        skip = (self.btn_refresh, self.btn_help_box)
+        bind_tree(self.account_box, "<Button-1>", lambda _e: app.show_account(), skip=skip)
+        set_cursor_tree(self.account_box, "hand2", skip=skip)
         self._account_mode: str | None = None
         self.update_account()
 
@@ -160,20 +245,21 @@ class Sidebar(ctk.CTkFrame):
             self._account_mode = mode
             self.btn_login.pack_forget()
             self.account_box.pack_forget()
-            anchor = dict(fill="x", pady=(0, 6), before=self._help_row)
-            (self.account_box if remote else self.btn_login).pack(**anchor)
+            (self.account_box if remote else self.btn_login).pack(side="left", fill="x", expand=True)
+            self._place_help()
         if not remote:
             return
         store = app.store
-        icon, text, kind = rl.status_line(store.status, store.pending_count, store.last_error)
+        icon, text, kind = rl.status_line(store.status, store.pending_count, store.last_error, short=self.compact)
         color = self.STATUS_COLORS[kind]
         self.account_name.configure(text=app.account.display_name or app.account.username)
         self.account_status.set(icon, text, color)
         self.btn_refresh.configure(state="disabled" if store.status == "syncing" else "normal")
 
     def _nav(self, key: str | None, text: str, icon: str | None = None, dot: str | None = None) -> None:
-        item = NavItem(self, text, command=lambda: self.select(key), icon=icon, dot=dot)
-        item.pack(fill="x", padx=12, pady=1)
+        item = NavItem(self.middle, text, command=lambda: self.select(key), icon=icon, dot=dot,
+                       height=NavItem.COMPACT_HEIGHT if self.compact else NavItem.HEIGHT)
+        item.pack(fill="x", padx=(0, 8), pady=1)
         self.items[key] = item
 
     def select(self, key: str | None) -> None:
@@ -225,17 +311,15 @@ class Sidebar(ctk.CTkFrame):
         if not self.tag_box.winfo_ismapped():
             self.tag_box.pack(fill="x")
         ctk.CTkLabel(self.tag_box, text="Étiquettes", font=theme.font(13, "bold"), text_color=theme.SIDEBAR_MUTED,
-                     anchor="w").pack(fill="x", padx=26, pady=(18, 4))
+                     anchor="w").pack(fill="x", padx=14, pady=(18, 4))
         many = len(counts) > self.TAGS_SHOWN
+        # all of them when expanded: the whole navigation scrolls (no scroll area inside the scroll area)
         shown = counts if self.tags_expanded else counts[:self.TAGS_SHOWN]
-        parent = self.tag_box
-        if self.tags_expanded and many:
-            parent = ScrollFrame(self.tag_box, height=200)
-            parent.pack(fill="x", padx=4)
         for tag, n in shown:
             label = tag if len(tag) <= 20 else tag[:19] + "…"
-            item = NavItem(parent, label, command=lambda t=tag: self.app.toggle_tag(t), dot="#A88E76", height=34)
-            item.pack(fill="x", padx=12 if parent is self.tag_box else 4, pady=1)
+            item = NavItem(self.tag_box, label, command=lambda t=tag: self.app.toggle_tag(t), dot="#A88E76",
+                           height=NavItem.COMPACT_HEIGHT if self.compact else 34)
+            item.pack(fill="x", padx=(0, 8), pady=1)
             item.set_count(n)
             item.set_active(fold(tag) in active)
         if many:
@@ -243,7 +327,7 @@ class Sidebar(ctk.CTkFrame):
                                  height=30, corner_radius=8, fg_color="transparent", hover_color=theme.SIDEBAR_HOVER,
                                  text_color=theme.SIDEBAR_ACCENT, font=theme.font(13, "bold"), anchor="w",
                                  command=self._toggle_tags_expanded)
-            more.pack(fill="x", padx=16, pady=(2, 0))
+            more.pack(fill="x", padx=(4, 8), pady=(2, 4))
 
     def _toggle_tags_expanded(self) -> None:
         self.tags_expanded = not self.tags_expanded
@@ -676,6 +760,9 @@ class App(ctk.CTk):
             messagebox.showinfo("PDF enregistré",
                                 f"Le PDF a été enregistré ici :\n{path}\n\n"
                                 "Ouvrez-le avec votre lecteur PDF pour l'imprimer.", parent=self)
+
+    def import_recipe(self) -> None:
+        self.import_pdf()
 
     def import_pdf(self) -> None:
         if not self.can_leave_editor():
