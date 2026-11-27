@@ -287,3 +287,14 @@ def test_tags_round_trip_and_validation(client, settings):
     assert len(too_many.json()["recipe"]["tags"]) == 20  # same cap as the desktop
     for bad in ("Noël", 3, {"a": 1}, ["ok", 4], [["nested"]]):
         assert put(client, h, rid=RID2, base=2, tags=bad).status_code == 422
+
+
+def test_no_photo_or_favorite_on_a_deleted_recipe(client, settings):
+    maman = register(client, settings, "maman")
+    assert put(client, maman).status_code == 200
+    assert client.delete(f"/recipes/{RID}", headers=maman).status_code == 204
+    r = client.post(f"/recipes/{RID}/images", files={"file": ("p.jpg", jpeg_bytes(), "image/jpeg")}, headers=maman)
+    assert r.status_code == 404
+    assert client.put(f"/recipes/{RID}/favorite", headers=maman).status_code == 404
+    assert client.delete(f"/recipes/{RID}", headers=maman).status_code == 204  # still idempotent
+    assert client.get(f"/recipes/{RID}", headers=maman).json()["deleted"] is True
