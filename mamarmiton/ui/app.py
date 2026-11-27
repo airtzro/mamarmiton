@@ -427,6 +427,36 @@ class App(ctk.CTk):
 
         ShareDialog(self, self, recipe)
 
+    def print_recipe(self, recipe: Recipe | None) -> None:
+        """Save the recipe as an A4 PDF, then open it so it can be printed from the viewer."""
+        if recipe is None:
+            return
+        from mamarmiton import export
+
+        home = Path.home()
+        docs = home / "Documents"
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Enregistrer la recette en PDF", defaultextension=".pdf",
+            initialdir=str(docs if docs.is_dir() else home),
+            initialfile=export.slugify(recipe.nom) + ".pdf", filetypes=[("Document PDF", "*.pdf")])
+        if not path:
+            return
+        try:
+            photos = self.store.image_paths(recipe)
+            export.export_pdf(recipe, Path(path), photos[0] if photos else None)
+        except Exception as exc:
+            log.exception("export PDF")
+            messagebox.showerror("Impression impossible",
+                                 f"Le PDF n'a pas pu être créé :\n{exc}", parent=self)
+            return
+        try:
+            export.open_file(Path(path))
+        except Exception:
+            log.exception("ouverture du PDF")
+            messagebox.showinfo("PDF enregistré",
+                                f"Le PDF a été enregistré ici :\n{path}\n\n"
+                                "Ouvrez-le avec votre lecteur PDF pour l'imprimer.", parent=self)
+
     def import_pdf(self) -> None:
         if not self.can_leave_editor():
             return

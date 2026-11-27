@@ -124,6 +124,11 @@ def _draw_icon(name: str, color: str) -> Image.Image:
         _stroke(d, pts((14, 3), (6, 3), (6, 21), (18, 21), (18, 7), (14, 3)), w, c)
         _stroke(d, pts((12, 17.5), (12, 10.5)), w, c)
         _stroke(d, pts((9, 13), (12, 10), (15, 13)), w, c)
+    elif name == "print":
+        _stroke(d, pts((7, 8), (7, 3.5), (17, 3.5), (17, 8)), w, c)
+        d.rounded_rectangle(box(3.5, 8, 20.5, 17), radius=2.5 * s, outline=c, width=w)
+        d.rectangle(box(7, 14, 17, 21), fill=(0, 0, 0, 0), outline=c, width=w)
+        _stroke(d, pts((9.5, 17), (14.5, 17)), w, c)
     elif name == "globe":
         d.ellipse(box(3, 3, 21, 21), outline=c, width=w)
         d.ellipse(box(8.5, 3, 15.5, 21), outline=c, width=w)
