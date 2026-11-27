@@ -5,6 +5,7 @@ import { busy, confirmDialog, openDialog, toast } from "./ui.js";
 import { EXPLANATION, hit, setUsageEnabled, usageEnabled } from "./usage.js";
 import { BACKUP_ACCEPT, OFFLINE_MESSAGE, backupFileName, importSummary } from "./backuplogic.js";
 import { buildReport } from "./diagnostics.js";
+import { TEXT_SIZES, applyTextSize, textSize } from "./textsize.js";
 
 function field(label, input) {
   const id = `a-${Math.random().toString(36).slice(2, 8)}`;
@@ -142,13 +143,23 @@ export function openAccountDialog({ onSignOut }) {
         const privacy = h("div", { class: "stack" },
           h("label", { class: "row", for: "share-usage" }, share, h("span", { text: "Partager des statistiques d'utilisation anonymes" })),
           h("p", { class: "muted", text: EXPLANATION }));
+        // three big pills, like the "Un problème / Une idée" choice; the page grows as soon as one is chosen
+        const sizeButtons = TEXT_SIZES.map(([value, label]) => h("button", {
+          class: `chip-btn chip-big${value === textSize() ? " is-on" : ""}`, type: "button", "aria-pressed": String(value === textSize()), text: label,
+          onClick: (e) => {
+            applyTextSize(value, true);
+            for (const b of sizeButtons) { const on = b === e.currentTarget; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); }
+          } }));
+        const sizes = h("div", { class: "stack", role: "group", "aria-labelledby": "text-size-label" },
+          h("p", { id: "text-size-label", class: "label", text: "Taille du texte" }),
+          h("div", { class: "row wrap" }, sizeButtons));
         clear(body).append(
           h("p", {}, "Connecté en tant que ", h("strong", { text: state.me.display_name || state.me.username }),
             h("span", { class: "muted", text: ` (@${state.me.username})` })),
           h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: passwordForm }, icon("key", 20), "Changer mon mot de passe"),
           state.me.is_admin ? h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: inviteForm }, icon("plus", 20), "Créer une invitation") : null,
           h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: reportForm }, icon("pencil", 20), "Signaler un problème"),
-          backupSection(), privacy, signOut);
+          sizes, backupSection(), privacy, signOut);
       }
 
       function reportForm() { buildReportForm(body, { back: home, backText: "Retour", sent: home }); }

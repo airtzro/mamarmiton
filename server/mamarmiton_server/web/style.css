@@ -26,6 +26,9 @@
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
+/* "Taille du texte" (account dialog): everything is in rem, so the root size scales the whole page */
+html[data-text-size="large"] { font-size: 115%; }
+html[data-text-size="xlarge"] { font-size: 130%; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
   font: 400 1.125rem/1.55 "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -47,6 +50,7 @@ main:focus { outline: none; }  /* focused by code on every page change, for scre
 .skip-link { position: absolute; left: 8px; top: -60px; z-index: 100; background: var(--accent); color: var(--on-accent); padding: 10px 16px; border-radius: 8px; }
 .skip-link:focus { top: 8px; }
 .muted { color: var(--muted); }
+.label { font-weight: 700; }
 .italic { font-style: italic; }
 .hint { color: var(--muted); font-size: .95rem; }
 .small { font-size: 1rem; }
@@ -79,6 +83,13 @@ main:focus { outline: none; }  /* focused by code on every page change, for scre
 @media (max-width: 520px) { .topbar .btn-accent .btn-label { display: none; } }
 /* icon-only buttons on a phone: 48 px each, so six fit at 360 px and the logo never gets squeezed out */
 @media (max-width: 520px) { .brand { flex: none; } .topbar .btn { min-width: 48px; padding-inline: 12px; } }
+
+/* bigger text: the labels leave the top bar sooner (icons only, like on a phone) */
+@media (max-width: 1000px) {
+  html[data-text-size] .brand span, html[data-text-size] .topbar .btn-label { display: none; }
+  html[data-text-size] .brand { flex: none; }
+  html[data-text-size] .topbar .btn { min-width: 48px; padding-inline: 12px; }
+}
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
 .card.pad { padding: 20px; }
@@ -173,6 +184,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 }
 .chip-btn:hover { background: var(--surface-alt); }
 .chip-btn.is-on { background: var(--text); border-color: var(--text); color: var(--bg); }
+.chip-big { min-height: 56px; padding-inline: 22px; font-size: 1.15rem; }
 .chip-tag { min-height: 40px; padding: 4px 14px; font-size: .98rem; border-width: 1.5px; border-color: var(--border); background: transparent; }
 .chip-tag:hover { border-color: var(--border-strong); }
 .chip-count { font-weight: 400; opacity: .7; margin-left: 2px; font-variant-numeric: tabular-nums; }
@@ -189,7 +201,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .sort-box select { width: auto; min-height: 44px; padding: 6px 36px 6px 12px; font-weight: 700; border-width: 1.5px; }
 
 /* one recipe = an index card: a dish-coloured edge, the name, what goes in it */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20.6rem), 1fr)); gap: 14px; }
 @media (max-width: 420px) { .grid { grid-template-columns: 1fr; gap: 10px; } }
 .recipe-card { position: relative; display: flex; min-height: 136px; overflow: hidden; }
 .recipe-card::before { content: ""; flex: none; width: 7px; background: var(--to); }
@@ -241,9 +253,12 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 @media (max-width: 520px) {
   .detail .actions .btn { width: 48px; padding: 0; }
   .detail .actions .btn-label { display: none; }
+  /* the menu hangs from the whole bar, not from its button: with big text the button can sit far from the right edge */
+  .detail-bar { position: relative; }
+  .detail .action-menu-box { position: static; }
 }
 .action-menu-box { position: relative; }
-.action-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 25; min-width: 250px; padding: 6px;
+.action-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 25; min-width: 250px; max-width: calc(100vw - 32px); padding: 6px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lift); }
 .action-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 50px; padding: 8px 14px; font: inherit; font-weight: 700;
   text-align: left; color: var(--text); background: transparent; border: 0; border-radius: 10px; cursor: pointer; }
@@ -273,7 +288,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .fact dt { font-size: 1rem; color: var(--muted); }
 .fact dd { font-size: 1.6rem; line-height: 1.15; }
 @media (max-width: 520px) {
-  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px 12px; }
+  .facts { gap: 10px 20px; }
   .fact dt { font-size: .88rem; }
   .fact dd { font-size: 1.3rem; }
 }
@@ -311,7 +326,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .note-text { white-space: pre-line; font-style: italic; font-size: 1.15rem; }
 
 /* step timers */
-.step-timers { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 0 58px; }
+.step-timers { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 0 3.6rem; }
 .timer-btn { min-height: 48px; color: var(--accent-text); }
 .timer-tray {
   position: fixed; z-index: 90; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right));
@@ -338,7 +353,7 @@ body.kitchen-open { overflow: hidden; }
   gap: 10px; touch-action: pan-y;
 }
 .kitchen:focus { outline: none; }
-.k-top { display: flex; align-items: center; gap: 10px; }
+.k-top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .k-counter { font-size: 1.6rem; margin: 0; color: var(--accent-text); white-space: nowrap; }
 .k-title { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-body { flex: 1; min-height: 0; display: flex; gap: 14px; }
@@ -349,7 +364,7 @@ body.kitchen-open { overflow: hidden; }
 .k-small { font-size: clamp(1.4rem, 5.2vw, 2.4rem); }
 .k-timer-buttons { margin: 0; }
 .k-timer-buttons .timer-btn { min-height: 64px; font-size: 1.4rem; padding: 8px 22px; }
-.k-panel { width: min(340px, 45%); overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.k-panel { width: min(21rem, 45%); overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
 .k-panel[hidden] { display: none; }
 .k-panel h2 { margin: 0 0 4px; }
 .k-ing-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 10px; font-size: 1.2rem; }
@@ -358,7 +373,9 @@ body.kitchen-open { overflow: hidden; }
   .k-panel { width: auto; max-height: 45%; flex: none; }
   .k-title { display: none; }
   .k-top { justify-content: space-between; }
-  .k-counter { flex: 1; }
+  .k-counter { flex: 1; font-size: 1.3rem; }
+  .k-nav { font-size: 1.15rem; padding-inline: 6px; gap: 4px; }
+  .k-nav .icon { display: none; }
 }
 .k-progress { display: flex; gap: 6px; }
 .k-progress span { flex: 1; height: 6px; border-radius: 3px; background: var(--border); }
@@ -374,7 +391,9 @@ body.kitchen-open { overflow: hidden; }
 
 /* shopping list */
 .courses { display: flex; flex-direction: column; gap: 14px; }
-.courses-add input { min-width: 0; }
+.courses-add { flex-wrap: wrap; }
+.courses-add input { min-width: 12rem; }
+.courses-recipe .grow { flex: 1 1 12rem; }
 .shopping { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; }
 .shop-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px dashed var(--border); }
 .shop-row:last-child { border-bottom: 0; }
@@ -392,12 +411,12 @@ body.kitchen-open { overflow: hidden; }
 .save-bar { position: sticky; bottom: 0; z-index: 15; display: flex; flex-direction: column; gap: 8px; margin: 4px -16px 0;
   padding: 12px 16px max(12px, env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border-strong); }
 .save-bar-buttons { display: flex; justify-content: flex-end; gap: 10px; }
-@media (max-width: 520px) { .save-bar-buttons .btn { flex: 1; } }
+@media (max-width: 520px) { .save-bar-buttons .btn { flex: 1; min-width: 0; padding-inline: 10px; } }
 body:has(.save-bar) .report-fab { display: none; }
 body:has(.save-bar) main { padding-bottom: 0; }
 .ing-rows { display: flex; flex-direction: column; gap: 12px; }
 .ing-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 48px; gap: 8px; align-items: center; }
-.ing-qty { display: grid; grid-template-columns: 90px 150px; gap: 8px; }
+.ing-qty { display: grid; grid-template-columns: 5.6rem 9.4rem; gap: 8px; }
 @media (max-width: 640px) {
   .ing-row { grid-template-columns: minmax(0, 1fr) 48px; }
   .ing-qty { grid-column: 1; grid-row: 2; grid-template-columns: 1fr 1.5fr; }
@@ -521,17 +540,77 @@ main { padding-bottom: 72px; }
 .kitchen-open .report-fab { display: none; }
 @media (max-width: 760px) { .report-fab { padding: 0; width: 60px; } .report-fab-label { display: none; } }
 @media (max-width: 760px) { .book-switch { max-width: calc(100vw - 108px); } }
-@media print { .report-fab { display: none; } }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
-@media print {
-  .topbar, .actions, .btn, .toasts, .banner, .offline-badge, .fav-btn, .book-switch { display: none !important; }
-  body { background: #fff; color: #000; }
-  .card { box-shadow: none; }
-}
-
 .pour-row { display: flex; gap: 8px; }
 .pour-row input[type="number"] { width: 5.5em; flex: none; }
 .pour-row input[type="text"] { flex: 1; min-width: 0; }
 
 .source-line { overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------- print
+   A recipe (or the shopping list) on A4, black on white, at the servings shown on screen.
+   Everything that only makes sense on a screen goes; the text size setting does not apply. */
+@page { size: A4; margin: 16mm 18mm; }
+@media print {
+  html, html[data-text-size] { font-size: 11pt !important; }
+  * { color: #000 !important; background: transparent !important; box-shadow: none !important; text-shadow: none !important; border-color: #888 !important; }
+  body { font-size: 1rem; line-height: 1.45; min-height: 0; }
+  main, .container, .container.narrow { max-width: none; padding: 0; }
+  a { text-decoration: none; }
+  .topbar, .skip-link, .detail-bar, .toasts, .banner, .offline-badge, .report-fab, .book-switch, .timer-tray, .kitchen, dialog,
+  .btn, .fav-btn, .thumbs, .step-timers, .tag-list, .hint:not(.source-line), .stepper .btn, .courses-add, .ingredients input[type="checkbox"] { display: none !important; }
+  .card, .card.pad, .hero, .hero:not(.has-photo), .hero.has-photo { border: 0; border-radius: 0; padding: 0; margin: 0; }
+  h1, h2 { break-after: avoid; }
+
+  /* title block: the photo stays small, top left */
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5mm; margin-bottom: 7mm; }
+  .hero.has-photo { grid-template-columns: 52mm minmax(0, 1fr); align-items: start; }
+  .hero.has-photo .hero-info { padding: 0; }
+  .cover-hero { aspect-ratio: 4 / 3; border-radius: 3mm; }
+  .hero-info { gap: 3mm; justify-content: flex-start; }
+  .hero-info h1 { font-size: 26pt; line-height: 1.1; }
+  .hero-kind { margin-bottom: 0; }
+  .owner-note { padding: 0; font-weight: 400; font-style: italic; }
+  .facts { gap: 2mm 8mm; }
+  .fact { break-inside: avoid; }
+  .fact dt { font-size: .85rem; }
+  .fact dd { font-size: 1.15rem; }
+
+  /* one column: ingredients, then steps, then the note */
+  .detail-body { display: block; }
+  .detail-body > * + *, .stack > * + * { margin-top: 6mm; }
+  .ingredients-card { position: static; max-height: none; overflow: visible; }
+  .detail-body .card > h2 { margin-bottom: 2mm; border-bottom: 1px solid #888; padding-bottom: 1mm; }
+  .stepper { margin: 0; }
+  .stepper-value { text-align: left; font-weight: 400; font-style: italic; }
+  .ingredients { margin-top: 2mm; columns: 2; column-gap: 10mm; }
+  .ingredients li { break-inside: avoid; border-bottom: 1px dotted #888; }
+  .ingredients label { min-height: 0; padding: 1.2mm 0; gap: 3mm; }
+  .ingredients .qty { white-space: normal; }
+  .ingredients .is-done .qty, .ingredients .is-done .ing-name, .step.is-done .step-text { text-decoration: none; }
+  .steps { margin-top: 3mm; gap: 0; counter-reset: step; }
+  .steps > li { counter-increment: step; break-inside: avoid; }
+  .step { padding: 0 0 3.5mm; gap: 4mm; font-size: 1.05rem; line-height: 1.45; border: 0; }
+  /* the number comes from the list, so a ticked step prints its number, not a check mark */
+  .step .badge { width: 7mm; height: 7mm; border: 1px solid #000; font-size: 0; }
+  .step .badge > * { display: none; }
+  .step .badge::before { content: counter(step); font-size: .95rem; font-weight: 700; }
+  .step-text { padding-top: .6mm; }
+  .note { margin-top: 6mm; padding: 2mm 0 2mm 4mm; border: 0; border-left: 1.5mm solid #888; border-radius: 0; break-inside: avoid; }
+  .note-text { font-size: 1rem; }
+  .source-line { margin-top: 1mm; font-size: .9rem; }
+  .credit { margin-top: 8mm; padding-top: 2mm; border-top: 1px solid #888; font-size: 1rem; }
+
+  /* shopping list: the check boxes stay, to tick on paper */
+  .courses-list { gap: 5mm; }
+  .courses-recipe .grow { font-weight: 700; }
+  .courses-recipe .stepper-value { flex: none; font-weight: 400; }
+  .list-row { padding: 1mm 0; }
+  .shop-row { break-inside: avoid; }
+  .shop-row label { min-height: 0; padding: 1.5mm 0; gap: 4mm; }
+  .shop-row input[type="checkbox"] { width: 4.5mm; height: 4.5mm; }
+  .shop-row.is-done .shop-label { text-decoration: none; }
+  .shop-text { font-size: 1.05rem; }
+  .shop-note { font-size: .85rem; }
+}
