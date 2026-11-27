@@ -448,6 +448,11 @@ class App(ctk.CTk):
     def refresh(self, recipe: Recipe | None = None) -> None:
         if self.current is self.detail and recipe is not None and self.store.get(recipe.id):
             self.detail.show(self.store.get(recipe.id))
+        elif self.current is self.home:  # keep the scroll position (clicking a star must not jump to the top)
+            canvas = self.home.grid_area._parent_canvas
+            top = canvas.yview()[0]
+            self.go_home()
+            self.after_idle(lambda: canvas.winfo_exists() and canvas.yview_moveto(top))
         else:
             self.go_home()
 

@@ -115,3 +115,21 @@ def test_timer_cancel_stops_ringing(app, monkeypatch):
     time.sleep(0.2)
     _pump(app)
     assert len(rings) == 1
+
+
+def test_favorite_star_on_home_keeps_scroll_position(app):
+    for i in range(40):
+        app.store.add(Recipe(nom=f"Z{i:02d}"))
+    app.geometry("1100x700")
+    app.home.m_sort.set(next(k for k in __import__("mamarmiton.ui.home", fromlist=["x"]).SORT_LABELS if "nom" in k))
+    app.go_home()
+    _pump(app, 10)
+    canvas = app.home.grid_area._parent_canvas
+    canvas.yview_moveto(0.6)
+    _pump(app)
+    before = canvas.yview()[0]
+    assert before > 0.3
+    target = app.home._cards[30].recipe if hasattr(app.home._cards[30], "recipe") else app.store.all()[30]
+    app.toggle_favorite(target)
+    _pump(app, 10)
+    assert canvas.yview()[0] > 0.2
