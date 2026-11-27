@@ -12,7 +12,7 @@ const NUMBER_WORDS = {
 // A number: "2", "2,5", "2.5", "1/2", "1 1/2"
 const NUM = String.raw`\d+(?:[.,]\d+)?(?:\s*/\s*\d+)?`;
 const MIXED = String.raw`\d+\s+\d+\s*/\s*\d+`;
-const NUMBER_RE = new RegExp(String.raw`(?<num>${MIXED}|${NUM})(?:\s*(?:-|à)\s*(?<num2>${MIXED}|${NUM}))?`, "iu");
+export const NUMBER_RE = new RegExp(String.raw`(?<num>${MIXED}|${NUM})(?:\s*(?:-|à)\s*(?<num2>${MIXED}|${NUM}))?`, "iu");
 const METRIC_RE = new RegExp(String.raw`^\s*(?:kg|g|gr|grammes?|mg|l|litres?|dl|cl|ml)${WB}`, "iu");
 const FIRST_WORD_RE = /^\s*([\p{L}\p{N}_]+)/u;
 const AMOUNT_RE = new RegExp(

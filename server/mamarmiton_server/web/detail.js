@@ -6,24 +6,11 @@ import { formatMinutes } from "./search.js";
 import { busy, confirmDialog, openDialog, toast } from "./ui.js";
 import { cover, dishClass, toggleFavorite } from "./home.js";
 import { openShareDialog } from "./share.js";
+import { openKitchen } from "./kitchen.js";
+import { timerButtons } from "./timer-tray.js";
+import { addRecipeToShopping, servingsInList } from "./courses.js";
 
 const servingsMemo = new Map();  // recipe id -> chosen number of people (kept across refreshes)
-let wakeLock = null;
-
-async function keepAwake(on) {
-  try {
-    if (on && "wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
-    else if (wakeLock) { await wakeLock.release(); wakeLock = null; }
-  } catch { /* not allowed or not supported: the screen may simply dim */ }
-}
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && document.body.classList.contains("cooking")) keepAwake(true);
-});
-
-export function leaveCookMode() {
-  document.body.classList.remove("cooking");
-  keepAwake(false);
-}
 
 function openLightbox(recipe, start) {
   let index = start;
@@ -72,25 +59,32 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
     document.title = `${recipe.nom} · Mamarmiton`;
     const servings = servingsMemo.get(id) ?? recipe.pour;
     const editable = canEdit(recipe);
-    const cooking = document.body.classList.contains("cooking");
 
     const back = h("a", { class: "btn btn-ghost", href: "#/" }, icon("back", 20), h("span", { text: "Toutes les recettes" }));
     const favBtn = h("button", { class: `btn btn-secondary${recipe.favori ? " is-on" : ""}`, type: "button", "aria-pressed": String(recipe.favori),
       onClick: () => toggleFavorite(recipe, onChange) }, icon(recipe.favori ? "star-filled" : "star", 20),
     h("span", { class: "btn-label", text: recipe.favori ? "Dans mes favoris" : "Ajouter aux favoris" }));
-    const cookBtn = h("button", { class: "btn btn-secondary", type: "button", "aria-pressed": String(cooking),
-      onClick: () => { const on = !document.body.classList.contains("cooking"); document.body.classList.toggle("cooking", on); keepAwake(on); draw(); window.scrollTo(0, 0); } },
-    icon("chef", 20), h("span", { class: "btn-label", text: cooking ? "Quitter le mode cuisine" : "Mode cuisine" }));
-    const actions = h("div", { class: "actions" }, cooking ? null : favBtn, cookBtn);
-    if (recipe.access === "owner" && !cooking) {
+    const cookBtn = h("button", { class: "btn btn-secondary", type: "button",
+      onClick: () => openKitchen(recipe, { servings: servingsMemo.get(id) ?? recipe.pour }) },
+    icon("chef", 20), h("span", { class: "btn-label", text: "Mode cuisine" }));
+    const inList = servingsInList(id);
+    const shopBtn = h("button", { class: "btn btn-secondary", type: "button", onClick: () => {
+      const n = servingsMemo.get(id) ?? recipe.pour;
+      addRecipeToShopping(recipe, n);
+      toast(`Ajouté aux courses pour ${n} personne${n > 1 ? "s" : ""}.`, "ok");
+      draw();
+    } }, icon("cart", 20), h("span", { class: "btn-label",
+      text: inList === null ? "Ajouter aux courses" : `Dans les courses (${inList} pers.) · mettre à jour` }));
+    const actions = h("div", { class: "actions" }, favBtn, cookBtn, shopBtn);
+    if (recipe.access === "owner") {
       actions.append(h("button", { class: "btn btn-secondary", type: "button", onClick: () => openShareDialog({ recipe }) },
         icon("share", 20), h("span", { class: "btn-label", text: "Partager" })));
     }
-    if (editable && !cooking) {
+    if (editable) {
       actions.append(h("button", { class: "btn btn-primary", type: "button", onClick: () => onEdit(id) },
         icon("pencil", 20), h("span", { class: "btn-label", text: "Modifier" })));
     }
-    if (recipe.access === "owner" && !cooking) {
+    if (recipe.access === "owner") {
       const del = h("button", { class: "btn btn-danger", type: "button" }, icon("trash", 20), h("span", { class: "btn-label", text: "Supprimer" }));
       del.addEventListener("click", async () => {
         const ok = await confirmDialog({ title: "Supprimer cette recette ?", danger: true, confirmText: "Supprimer",
@@ -203,16 +197,16 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
                 badge.replaceChildren(...(on ? [icon("check", 18)] : [String(i + 1)]));
               } },
             badge, h("span", { class: "step-text", text }));
-            return h("li", {}, button);
+            return h("li", {}, button, timerButtons(i, text));
           }))]
         : h("p", { class: "muted", text: "Aucune étape pour l'instant." }));
     const notes = recipe.notes.trim()
       ? h("section", { class: "note" }, h("h2", { class: "serif", text: "Le petit mot du chef" }), h("p", { class: "note-text", text: recipe.notes }))
       : null;
 
-    clear(main).append(h("div", { class: `container detail${cooking ? " cook" : ""}` },
+    clear(main).append(h("div", { class: "container detail" },
       h("div", { class: "detail-bar" }, back, actions),
-      cooking ? h("h1", { class: "serif cook-title", text: recipe.nom }) : hero,
+      hero,
       h("div", { class: "detail-body" }, ingredients, h("div", { class: "stack" }, steps, notes))));
   }
   draw();

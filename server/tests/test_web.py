@@ -1,3 +1,7 @@
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -137,3 +141,11 @@ def test_csp_needs_no_change_for_the_service_worker(client):
     csp = client.get("/").headers["content-security-policy"]
     assert "script-src 'self'" in csp and "unsafe-inline" not in csp
     assert "worker-src" not in csp  # falls back to script-src 'self'
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_javascript_unit_tests():
+    """Pure web modules (timers, shopping, quantities port) are tested with node's built-in runner."""
+    tests = Path(__file__).parent / "js"
+    result = subprocess.run(["node", "--test", str(tests)], capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]

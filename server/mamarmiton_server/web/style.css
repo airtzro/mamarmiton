@@ -228,13 +228,71 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .note h2 { font-size: 1.25rem; margin-bottom: 6px; }
 .note-text { white-space: pre-line; font-style: italic; }
 
-/* cooking mode: big text, only what is needed at the stove */
-.cook { max-width: 900px; font-size: 1.35em; }
-.cook .detail-body { grid-template-columns: 1fr; }
-.cook-title { margin-bottom: 16px; }
-.cook .step-text { font-size: 1.1em; }
-.cook .ingredients label { min-height: 64px; }
-.cook .hint { display: none; }
+/* step timers */
+.step-timers { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 0 58px; }
+.timer-btn { min-height: 48px; color: var(--accent-text); }
+.timer-tray {
+  position: fixed; z-index: 90; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right));
+  bottom: max(8px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none;
+}
+.kitchen-open .timer-tray { bottom: calc(max(8px, env(safe-area-inset-bottom)) + 96px); }
+.timer-tray:empty { display: none; }
+.timer-item {
+  pointer-events: auto; display: flex; align-items: center; gap: 10px; width: min(480px, 100%); padding: 6px 6px 6px 16px;
+  background: var(--bar); color: var(--bar-text); border-radius: 14px; box-shadow: var(--shadow); font-weight: 700; font-size: 1.15rem;
+}
+.timer-text { flex: 1; font-variant-numeric: tabular-nums; }
+.timer-close { color: inherit; width: 48px; height: 48px; padding: 0; }
+.timer-close:hover { background: var(--bar-hover); }
+.timer-item.is-done { background: var(--accent); color: var(--on-accent); animation: timer-pulse 1s ease-in-out infinite alternate; }
+.timer-item.is-done .timer-close:hover { background: var(--accent-hover); }
+@keyframes timer-pulse { to { transform: scale(1.03); } }
+
+/* kitchen mode: one big step, readable from across the counter */
+body.kitchen-open { overflow: hidden; }
+.kitchen {
+  position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column; background: var(--bg); color: var(--text);
+  padding: max(10px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  gap: 10px; touch-action: pan-y;
+}
+.kitchen:focus { outline: none; }
+.k-top { display: flex; align-items: center; gap: 10px; }
+.k-counter { font-size: 1.6rem; margin: 0; color: var(--accent-text); white-space: nowrap; }
+.k-title { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-body { flex: 1; min-height: 0; display: flex; gap: 14px; }
+.k-stage { flex: 1; min-width: 0; overflow-y: auto; padding: 8px 4px 16px; display: flex; flex-direction: column; gap: 20px; }
+.k-text { margin: 0; line-height: 1.3; font-weight: 700; white-space: pre-line; overflow-wrap: anywhere; }
+.k-large { font-size: clamp(2rem, 8vw, 3.6rem); }
+.k-medium { font-size: clamp(1.7rem, 6.5vw, 2.9rem); }
+.k-small { font-size: clamp(1.4rem, 5.2vw, 2.4rem); }
+.k-timer-buttons { margin: 0; }
+.k-timer-buttons .timer-btn { min-height: 64px; font-size: 1.4rem; padding: 8px 22px; }
+.k-panel { width: min(340px, 45%); overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.k-panel[hidden] { display: none; }
+.k-panel h2 { margin: 0 0 4px; }
+.k-ing-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 10px; font-size: 1.2rem; }
+@media (max-width: 640px) {
+  .k-body { flex-direction: column; }
+  .k-panel { width: auto; max-height: 45%; flex: none; }
+  .k-title { display: none; }
+  .k-top { justify-content: space-between; }
+  .k-counter { flex: 1; }
+}
+.k-bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.k-nav { min-height: 80px; font-size: 1.5rem; border-radius: 18px; }
+
+/* shopping list */
+.courses { display: flex; flex-direction: column; gap: 14px; }
+.courses-add input { min-width: 0; }
+.shopping { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; }
+.shop-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px dashed var(--border); }
+.shop-row:last-child { border-bottom: 0; }
+.shop-row label { flex: 1; display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 6px 0; cursor: pointer; }
+.shop-row input[type="checkbox"] { width: 28px; height: 28px; accent-color: var(--accent); flex: none; }
+.shop-text { display: flex; flex-direction: column; font-size: 1.1rem; }
+.shop-note { font-size: .85rem; font-weight: 400; }
+.shop-row.is-done .shop-label { text-decoration: line-through; color: var(--muted); }
+.stepper.small { display: inline-flex; align-items: center; gap: 6px; }
 
 /* -------------------------------------------------------------- editor */
 .ing-rows { display: flex; flex-direction: column; gap: 12px; }
