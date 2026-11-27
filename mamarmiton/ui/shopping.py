@@ -128,7 +128,6 @@ class ShoppingView(ctk.CTkFrame):
         self._rows, self._recipe_rows, self._wrapped = {}, [], []
         self._built = False
         self._two_cols = None
-        state = self.app.shopping
         selection = self._selection()
         self.items = build_list(selection)
         # no pruning here: recipes missing from this book may belong to the other account's book
