@@ -180,6 +180,11 @@ def _draw_icon(name: str, color: str) -> Image.Image:
     elif name == "copy":
         d.rounded_rectangle(box(8, 8, 20, 20), radius=2.5 * s, outline=c, width=w)
         _stroke(d, pts((16, 8), (16, 5), (4, 5), (4, 16), (8, 16)), w, c)
+    elif name == "play":
+        d.polygon(pts((8, 5), (19, 12), (8, 19)), fill=c)
+    elif name == "forward":
+        _stroke(d, pts((5, 12), (19, 12)), w, c)
+        _stroke(d, pts((13, 6), (19, 12), (13, 18)), w, c)
     elif name == "close":
         _stroke(d, pts((6, 6), (18, 18)), w, c)
         _stroke(d, pts((18, 6), (6, 18)), w, c)

@@ -11,6 +11,7 @@ import customtkinter as ctk
 
 from mamarmiton.models import Recipe, format_minutes
 from mamarmiton.quantities import scale_quantity
+from mamarmiton.timers import find_durations, format_short
 from mamarmiton.ui import art, remote_logic as rl, theme
 from mamarmiton.ui.widgets import Modal, ScrollFrame, bind_tree, pointer_inside, set_cursor_tree
 
@@ -69,7 +70,7 @@ class IngredientRow(ctk.CTkFrame):
 class StepRow(ctk.CTkFrame):
     """A numbered step. Clicking it marks it as done (not saved)."""
 
-    def __init__(self, master, number: int, text: str):
+    def __init__(self, master, number: int, text: str, on_timer=None):
         super().__init__(master, fg_color="transparent", corner_radius=12)
         self.done = False
         self.number = number
@@ -83,6 +84,16 @@ class StepRow(ctk.CTkFrame):
         bind_tree(self, "<Button-1>", self._toggle)
         hover_rows(self, theme.SURFACE_HOVER)
         set_cursor_tree(self, "hand2")
+        # timer buttons are added after the click binding so pressing one does not tick the step
+        durations = find_durations(text) if on_timer else []
+        if durations:
+            timers = ctk.CTkFrame(self, fg_color="transparent")
+            timers.grid(row=1, column=1, sticky="w", padx=(0, 16), pady=(0, 12))
+            for d in durations:
+                theme.secondary_button(
+                    timers, text=f" {format_short(d.seconds)}", width=0, height=30, corner_radius=15,
+                    font=theme.font(13, "bold"), compound="left", image=art.icon("play", theme.ACCENT_TEXT, 12),
+                    command=lambda s=d.seconds: on_timer(number, s)).pack(side="left", padx=(0, 8))
 
     def _toggle(self, _event=None) -> None:
         self.done = not self.done
@@ -315,6 +326,9 @@ class DetailView(ctk.CTkFrame):
         if r.etapes:
             ctk.CTkLabel(head, text=f"{len(r.etapes)} étape{'s' if len(r.etapes) > 1 else ''}",
                          font=theme.font(13), text_color=theme.MUTED).pack(side="left", padx=(12, 0), pady=(6, 0))
+            theme.secondary_button(head, text="Mode cuisine", width=0, height=36, compound="left",
+                                   image=art.icon("pot", theme.TEXT, 17),
+                                   command=lambda: self.app.open_kitchen(r, self.servings)).pack(side="right")
             ctk.CTkLabel(box, text="Astuce : cliquez sur une étape quand elle est faite.", font=theme.font(12),
                          text_color=theme.FAINT, anchor="w").pack(anchor="w", padx=22, pady=(0, 6))
 
@@ -333,7 +347,7 @@ class DetailView(ctk.CTkFrame):
             for i, text in enumerate(r.etapes, 1):
                 if i > 1:
                     theme.divider(steps).pack(fill="x", padx=(66, 16))
-                row = StepRow(steps, i, text)
+                row = StepRow(steps, i, text, on_timer=lambda n, secs: self.app.start_timer(f"Étape {n}", secs))
                 row.pack(fill="x", pady=2)
                 self._wrapped.append((row, "step"))
 

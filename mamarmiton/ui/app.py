@@ -18,6 +18,8 @@ from mamarmiton.search import Filters, search
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES, Settings
 from mamarmiton.remote import AuthError, OfflineError, RemoteStore, clear_account, open_store
 from mamarmiton.storage import RecipeStore
+from mamarmiton.ui.kitchen import KitchenView, keep_awake
+from mamarmiton.ui.timerbar import TimerBar
 from mamarmiton.ui import art, remote_logic as rl, theme
 from mamarmiton.ui.account import AccountDialog
 from mamarmiton.ui.conflicts import ConflictDialog
@@ -202,11 +204,15 @@ class App(ctk.CTk):
         self.detail = DetailView(self, self)
         self.editor = EditorView(self, self)
         self.current: ctk.CTkFrame | None = None
+        self.timers = TimerBar(self)  # lives here so running timers survive changing screens
+        self.kitchen: KitchenView | None = None
         self._before_editor: Recipe | None = None  # recipe to return to when the editor closes
 
         self.bind_all("<Control-n>", lambda _e: self.new_recipe())
         self.bind_all("<Control-f>", lambda _e: self.focus_search())
         self.bind_all("<Control-s>", lambda _e: self.current is self.editor and self.editor.submit())
+        for key, action in (("<Escape>", "close"), ("<Left>", "previous"), ("<Right>", "next"), ("<space>", "next")):
+            self.bind(key, lambda _e, a=action: self._kitchen_key(a), add="+")
         self.protocol("WM_DELETE_WINDOW", self._quit)
 
         self.go_home()
@@ -286,6 +292,29 @@ class App(ctk.CTk):
             return
         self.detail.show(recipe)
         self._switch(self.detail)
+
+    # ------------------------------------------------- timers and kitchen mode
+    def start_timer(self, label: str, seconds: int) -> None:
+        self.timers.start(label, seconds)
+
+    def open_kitchen(self, recipe: Recipe, servings: int | None = None) -> None:
+        if self.kitchen is not None or not recipe.etapes:
+            return
+        self.kitchen = KitchenView(self, recipe, servings)
+        self.timers.dock(True)
+        keep_awake(True)
+
+    def close_kitchen(self) -> None:
+        if self.kitchen is None:
+            return
+        self.kitchen.destroy()
+        self.kitchen = None
+        self.timers.dock(False)
+        keep_awake(False)
+
+    def _kitchen_key(self, action: str) -> None:
+        if self.kitchen is not None:
+            getattr(self.kitchen, action)()
 
     def refresh(self, recipe: Recipe | None = None) -> None:
         if self.current is self.detail and recipe is not None and self.store.get(recipe.id):
@@ -654,6 +683,7 @@ class App(ctk.CTk):
         self.after(300, self._check_conflicts)
 
     def _quit(self) -> None:
+        self.close_kitchen()
         self.finish_pending_delete()
         self.runner.stop()
         if self.is_remote:

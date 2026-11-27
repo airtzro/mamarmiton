@@ -19,7 +19,7 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 |---|---|---|
 | **Print / export a recipe to PDF** | Cooks still like paper in the kitchen. Render the detail view to a one-page A4 PDF (reportlab, or Pillow → PDF). | S |
 | **Kitchen mode** | Full-screen, very large text, one step at a time with big Précédent/Suivant buttons, and the screen kept awake. | S |
-| **Timers in steps** | Detect "25 minutes" in a step and show a ▶ button that starts a countdown with a sound. | S |
+| ~~**Timers in steps**~~ (done, with Kitchen mode) | Detect "25 minutes" in a step and show a ▶ button that starts a countdown with a sound. | S |
 | **Duplicate a recipe** | "Créer une variante" button: copy, then open the editor. | S |
 | **Undo delete** | A toast with "Annuler" for 10 s instead of only a confirm dialog (the store already keeps `.bak`). | S |
 | **Tags** | Free tags ("Noël", "rapide", "sans gluten") with chips in the sidebar filter. | S |
