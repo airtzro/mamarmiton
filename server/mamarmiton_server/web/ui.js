@@ -115,6 +115,15 @@ export async function busy(button, task) {
   try { return await task(); } finally { button.disabled = false; button.removeAttribute("aria-busy"); }
 }
 
+/** A "show the password" checkbox that switches every given password field between hidden and readable. */
+export function showPasswordToggle(...inputs) {
+  const id = `show-pw-${Math.random().toString(36).slice(2, 8)}`;
+  const box = h("input", { type: "checkbox", id,
+    onChange: (e) => { for (const input of inputs) input.type = e.target.checked ? "text" : "password"; } });
+  return h("label", { class: "check", for: id }, box,
+    h("span", { text: inputs.length > 1 ? "Afficher les mots de passe" : "Afficher le mot de passe" }));
+}
+
 // ------------------------------------------------------------------- theme
 const THEME_KEY = "mamarmiton.theme";
 const dark = window.matchMedia("(prefers-color-scheme: dark)");

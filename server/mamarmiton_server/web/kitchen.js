@@ -13,6 +13,8 @@ export function stepSizeClass(text) {
   return n < 140 ? "k-large" : n < 280 ? "k-medium" : "k-small";
 }
 
+export const inCookMode = () => current !== null;
+
 export function leaveCookMode() {
   if (current) current.close();
 }

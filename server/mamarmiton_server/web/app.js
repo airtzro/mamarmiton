@@ -4,11 +4,13 @@ import { flushUsage } from "./usage.js";
 import { h, icon, clear } from "./dom.js";
 import { hydrate, pendingCount, persist, resetState, state, sync } from "./state.js";
 import * as store from "./offline.js";
-import { hasOpenDialog, initTheme, isDark, setOffline, toast, toggleTheme } from "./ui.js";
+import { hasOpenDialog, initTheme, isDark, setBanner, setOffline, toast, toggleTheme } from "./ui.js";
 import { renderLogin } from "./login.js";
 import { renderHome } from "./home.js";
 import { renderDetail } from "./detail.js";
-import { leaveCookMode } from "./kitchen.js";
+import { inCookMode, leaveCookMode } from "./kitchen.js";
+import { activeTimers } from "./timer-tray.js";
+import { WAITING_TEXT, watchForUpdates } from "./freshness.js";
 import { clearShopping, renderCourses } from "./courses.js";
 import { renderEditor } from "./editor.js";
 import { openAccountDialog, openReportDialog } from "./account.js";
@@ -68,6 +70,12 @@ window.addEventListener("online", () => { lastSync = 0; refresh(); });
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => { navigator.serviceWorker.register("/app/sw.js", { scope: "/" }).catch(() => {}); });
 }
+// after a deploy every open tab reloads onto the new version, except while that would lose something
+const checkForUpdate = watchForUpdates({
+  isBusy: () => (view?.kind === "editor" && !!view.dirty?.()) || activeTimers().some((t) => !t.done)
+    || inCookMode() || hasOpenDialog(),
+  onWaiting: (on) => setBanner(on ? WAITING_TEXT : ""),
+});
 function forgetPhotosOnDevice() {
   try { if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: "clear-photos" }); } catch { /* ignore */ }
 }
@@ -188,6 +196,7 @@ function route() {
     view.kind = "home";
   }
   if (view.kind !== "editor") main.focus({ preventScroll: true });
+  checkForUpdate();  // left the editor or a recipe: a waiting update can install now
 }
 // leaving the editor with unsaved changes (Courses, logo, back button…) asks first instead of losing them
 window.addEventListener("hashchange", async (e) => {

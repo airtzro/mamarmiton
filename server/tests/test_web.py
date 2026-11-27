@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from mamarmiton_server.api import WEB_DIR, create_app
+from mamarmiton_server.api import WEB_DIR, create_app, web_build
 from mamarmiton_server.config import Settings
 
 
@@ -114,7 +114,7 @@ def test_service_worker_is_served_with_whole_site_scope(client):
     assert r.headers["service-worker-allowed"] == "/"
     assert r.headers["cache-control"] == "no-cache"
     assert r.headers["x-content-type-options"] == "nosniff"
-    assert "__VERSION__" not in r.text and f'"{__version__}"' in r.text
+    assert "__VERSION__" not in r.text and f'"{__version__}+{web_build()}"' in r.text
     assert client.head("/app/sw.js").status_code == 200
 
 
@@ -153,3 +153,20 @@ def test_javascript_unit_tests():
     assert files
     result = subprocess.run(["node", "--test", *files], capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
+
+
+def test_page_and_version_carry_the_same_web_build(client):
+    build = web_build()
+    assert len(build) == 12
+    assert f'<meta name="mamarmiton-build" content="{build}">' in client.get("/").text
+    assert client.get("/version").json()["web"] == build
+    assert client.head("/").status_code == 200
+
+
+def test_web_build_changes_when_a_web_file_changes(tmp_path):
+    web = tmp_path / "web"
+    shutil.copytree(WEB_DIR, web)
+    before = web_build(web)
+    assert web_build(web) == before  # stable between two starts of the same deploy
+    (web / "app.js").write_text((web / "app.js").read_text(encoding="utf-8") + "\n// changed", encoding="utf-8")
+    assert web_build(web) != before

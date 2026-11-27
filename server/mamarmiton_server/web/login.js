@@ -1,6 +1,6 @@
 import { api, token } from "./api.js";
 import { h, clear } from "./dom.js";
-import { busy } from "./ui.js";
+import { busy, showPasswordToggle } from "./ui.js";
 
 const deviceName = () => "Navigateur web";
 
@@ -49,6 +49,7 @@ export function renderLogin(root, { message = "", onDone }) {
         mode === "register" ? "2 à 32 lettres minuscules, chiffres, point, tiret ou souligné." : null),
       field("Mot de passe", password),
       mode === "register" ? field("Mot de passe (encore une fois)", confirm) : null,
+      mode === "register" ? showPasswordToggle(password, confirm) : showPasswordToggle(password),
       error,
       submit,
       h("button", { class: "btn btn-link", type: "button",

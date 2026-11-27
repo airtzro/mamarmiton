@@ -1,7 +1,7 @@
 import { api, token } from "./api.js";
 import { h, icon, clear } from "./dom.js";
 import { pendingCount, state, sync } from "./state.js";
-import { busy, confirmDialog, openDialog, toast } from "./ui.js";
+import { busy, confirmDialog, openDialog, showPasswordToggle, toast } from "./ui.js";
 import { EXPLANATION, hit, setUsageEnabled, usageEnabled } from "./usage.js";
 import { BACKUP_ACCEPT, OFFLINE_MESSAGE, backupFileName, importSummary } from "./backuplogic.js";
 import { buildReport } from "./diagnostics.js";
@@ -172,6 +172,7 @@ export function openAccountDialog({ onSignOut }) {
         const save = h("button", { class: "btn btn-primary", type: "submit", text: "Changer le mot de passe" });
         const form = h("form", { class: "stack", novalidate: true },
           field("Mot de passe actuel", old), field("Nouveau mot de passe", next), field("Nouveau mot de passe (encore une fois)", again),
+          showPasswordToggle(old, next, again),
           error,
           h("div", { class: "row end wrap" }, h("button", { class: "btn btn-secondary", type: "button", onClick: home, text: "Retour" }), save));
         form.addEventListener("submit", async (e) => {

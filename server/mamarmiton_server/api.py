@@ -13,6 +13,7 @@ learns about deletions and revoked shares) and the caller's favourites.
 """
 
 
+import hashlib
 import json
 import logging
 import re
@@ -297,6 +298,19 @@ WEB_PAGE_HEADERS = {**WEB_COMMON_HEADERS, "Content-Security-Policy": WEB_CSP, "C
                     "X-Frame-Options": "DENY"}
 
 
+def web_build(root: Path = WEB_DIR) -> str:
+    """A short fingerprint of every file of the web app: it changes with each deploy that changes the page.
+
+    Open tabs compare it with the one their page was served with and reload when it differs,
+    so nobody keeps running yesterday's code (see web/freshness.js)."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(root).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
 def _web_file(asset_path: str) -> Path | None:
     """The file under web/ for a URL path, or None (unknown, outside web/, or a type we do not serve)."""
     if not asset_path or "\\" in asset_path or "\x00" in asset_path:
@@ -315,6 +329,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     limiter = security.LoginLimiter(settings.login_attempts, settings.login_window_s)
 
     app = FastAPI(title="Mamarmiton", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
+    build = web_build()
+    app.state.web_build = build
     app.state.settings = settings
     app.state.limiter = limiter
     app.add_middleware(BodyLimitMiddleware, settings=settings)
@@ -501,15 +517,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # The recipe book as a web page: static files, no build step. They live
     # under /app so they can never collide with an API route.
     @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-    def web_index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html", media_type="text/html; charset=utf-8", headers=WEB_PAGE_HEADERS)
+    def web_index() -> Response:
+        # the page carries the build it belongs to; its scripts compare it with GET /version
+        html = (WEB_DIR / "index.html").read_text(encoding="utf-8").replace("__BUILD__", build)
+        return Response(html, media_type="text/html; charset=utf-8", headers=WEB_PAGE_HEADERS)
 
     @app.api_route("/app/{asset_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def web_asset(asset_path: str) -> Response:
         if asset_path == "sw.js":
             # the service worker lives under /app but controls the whole site (photos are under /recipes);
-            # the release number in it makes a new version replace the old shell cache
-            code = (WEB_DIR / "sw.js").read_text(encoding="utf-8").replace("__VERSION__", __version__)
+            # the release number and the build in it make every deploy replace the old shell cache
+            code = (WEB_DIR / "sw.js").read_text(encoding="utf-8").replace("__VERSION__", f"{__version__}+{build}")
             return Response(code, media_type=WEB_TYPES[".js"], headers={
                 **WEB_COMMON_HEADERS, "Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
         path = _web_file(asset_path)
@@ -537,7 +555,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/version")
     def version() -> dict:
-        return {"server": __version__, "min_desktop": settings.min_desktop_version or None}
+        return {"server": __version__, "min_desktop": settings.min_desktop_version or None, "web": build}
 
     # --------------------------------------------------------------- auth
     def _open_session(conn: sqlite3.Connection, user_id: int, device: str) -> str:
