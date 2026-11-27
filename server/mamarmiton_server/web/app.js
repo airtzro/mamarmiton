@@ -13,6 +13,7 @@ import { clearShopping, renderCourses } from "./courses.js";
 import { renderEditor } from "./editor.js";
 import { openAccountDialog, openReportDialog } from "./account.js";
 import { forgetImportStatus, importStatus, loadImportStatus, openImportDialog } from "./importer.js";
+import { initTextSize } from "./textsize.js";
 import { setPendingDraft, takePendingDraft } from "./importlogic.js";
 
 const root = document.getElementById("root");
@@ -25,6 +26,7 @@ let lastSync = 0;
 let loggedIn = false;
 
 initTheme();
+initTextSize();
 
 // ------------------------------------------------------------------ session
 let offline = false;

@@ -87,6 +87,7 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
     const more = actionMenu({ items: [
       owner ? { icon: "share", text: "Partager", onClick: () => openShareDialog({ recipe }) } : null,
       recipe.can_copy ? { icon: "copy", text: "Créer une variante", onClick: (e, button) => variant(button) } : null,
+      { icon: "print", text: "Imprimer / PDF", onClick: () => { hit("pdf_export"); window.print(); } },
       editable ? { icon: "camera", text: "Ajouter une photo", onClick: () => photoInput.click() } : null,
       owner ? { icon: "trash", text: "Supprimer", danger: true, onClick: (e, button) => removeRecipe(button) }
         : { icon: "close", text: "Retirer de mes recettes", danger: true, onClick: (e, button) => hideShared(button) },

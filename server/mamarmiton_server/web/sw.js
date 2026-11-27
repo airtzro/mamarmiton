@@ -17,7 +17,7 @@ const SHELL = [
   "/app/login.js", "/app/home.js", "/app/detail.js", "/app/editor.js", "/app/share.js", "/app/account.js",
   "/app/quantities.js", "/app/search.js", "/app/timers.js", "/app/timer-tray.js", "/app/kitchen.js",
   "/app/shopping.js", "/app/courses.js", "/app/usage.js", "/app/diagnostics.js", "/app/books.js",
-  "/app/importer.js", "/app/importlogic.js",
+  "/app/importer.js", "/app/importlogic.js", "/app/textsize.js",
   "/app/style.css", "/app/manifest.webmanifest",
   "/app/icon.svg", "/app/icon-180.png", "/app/icon-192.png", "/app/icon-512.png",
   "/app/fonts/AtkinsonHyperlegible-Regular.ttf", "/app/fonts/AtkinsonHyperlegible-Bold.ttf",
