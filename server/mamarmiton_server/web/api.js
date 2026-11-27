@@ -1,6 +1,21 @@
 // Talks to the Mamarmiton API. The token lives in localStorage (this origin only).
 
 const TOKEN_KEY = "mamarmiton.token";
+const CLIENT_HEADER = "web/1";  // sent as X-Mamarmiton-Client on every request
+const RELOAD_KEY = "mamarmiton.upgradeReload";
+const RELOAD_GUARD_MS = 60_000;
+
+// The server always serves the current web app, so a 426 ("too old") is cured by one reload.
+// The timestamp in sessionStorage stops a reload loop if the answer persists.
+export function reloadOnceForUpgrade(storage, reload, now = Date.now()) {
+  try {
+    const last = storage.getItem(RELOAD_KEY);
+    if (last !== null && now - Number(last) < RELOAD_GUARD_MS) return false;
+    storage.setItem(RELOAD_KEY, String(now));
+  } catch { return false; }
+  reload();
+  return true;
+}
 
 export class ApiError extends Error {
   constructor(status, message, detail = null, offline = false) {
@@ -41,7 +56,7 @@ function friendlyMessage(status, detail, retryAfter) {
 }
 
 async function request(method, path, { json, form, auth = true, signal } = {}) {
-  const headers = {};
+  const headers = { "X-Mamarmiton-Client": CLIENT_HEADER };
   const init = { method, headers, signal, cache: "no-store" };
   if (auth && currentToken()) headers.Authorization = `Bearer ${currentToken()}`;
   if (json !== undefined) {
@@ -64,6 +79,9 @@ async function request(method, path, { json, form, auth = true, signal } = {}) {
   let detail = null;
   try { detail = (await response.json()).detail ?? null; } catch { /* no JSON body */ }
   const message = friendlyMessage(response.status, detail, response.headers.get("Retry-After"));
+  if (response.status === 426 && typeof window !== "undefined") {
+    try { reloadOnceForUpgrade(window.sessionStorage, () => window.location.reload()); } catch { /* ignore */ }
+  }
   if (response.status === 401 && auth) onUnauthorized(message);
   throw new ApiError(response.status, message, detail);
 }

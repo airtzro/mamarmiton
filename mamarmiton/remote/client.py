@@ -7,6 +7,8 @@ raises one of:
 * ``ConflictError`` (409): ``.current`` holds the server's version of the
   recipe (an API "recipe_out" dict) when the server sent it.
 * ``OfflineError``: network failure, timeout, DNS error or a 5xx answer.
+* ``UpgradeRequired`` (426, a kind of ``OfflineError`` so queued changes are kept): this app is older
+  than the server's minimum; ``.min_version`` says which version is needed.
 * ``ApiError`` (any other 4xx): ``.status`` and a French ``.message``.
 """
 
@@ -17,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
+from mamarmiton import __version__
 
 TIMEOUT = 15.0
 
@@ -49,6 +53,14 @@ class OfflineError(ApiError):
         super().__init__(status, message)
 
 
+class UpgradeRequired(OfflineError):
+    """HTTP 426: the server wants a newer desktop app. Nothing is lost: the local data stays as it is."""
+
+    def __init__(self, message: str, min_version: str = ""):
+        super().__init__(message, 426)
+        self.min_version = min_version
+
+
 class ApiClient:
     """Wrapper over the HTTP API.
 
@@ -72,13 +84,15 @@ class ApiClient:
 
     # ------------------------------------------------------------ plumbing
     def _request(self, method: str, path: str, *, raw: bool = False, **kwargs: Any) -> Any:
-        headers = kwargs.pop("headers", {})
+        headers = {"X-Mamarmiton-Client": f"desktop/{__version__}", **kwargs.pop("headers", {})}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         try:
             response = self._http.request(method, self.base_url + path, headers=headers, **kwargs)
         except httpx.TransportError as exc:  # connect, DNS, timeout, reset...
             raise OfflineError() from exc
+        if response.status_code == 426:
+            raise self._upgrade_required(response)
         if response.status_code >= 500:
             raise OfflineError("Le serveur ne répond pas correctement.", response.status_code)
         if response.status_code >= 400:
@@ -88,6 +102,17 @@ class ApiClient:
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
+
+    @staticmethod
+    def _upgrade_required(response: httpx.Response) -> UpgradeRequired:
+        message, minimum = "Cette version de Mamarmiton est trop ancienne. Mettez-la à jour.", ""
+        try:
+            body = response.json()
+            message = str(body.get("detail") or message)
+            minimum = str(body.get("min_version") or "")
+        except (ValueError, AttributeError):
+            pass
+        return UpgradeRequired(message, minimum)
 
     @staticmethod
     def _error(response: httpx.Response) -> ApiError:

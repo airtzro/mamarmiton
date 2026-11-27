@@ -7,11 +7,14 @@ their own tables.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -112,14 +115,116 @@ def connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def init(path: Path) -> None:
+class SchemaTooNew(RuntimeError):
+    """The database was written by a newer server than this code."""
+
+
+class MigrationError(RuntimeError):
+    """A migration failed; the database was rolled back to its previous version."""
+
+
+def _statements(script: str) -> Iterator[str]:
+    """Split a SQL script into statements (``executescript`` would commit mid-transaction)."""
+    buffer = ""
+    for line in script.splitlines(keepends=True):
+        buffer += line
+        if sqlite3.complete_statement(buffer):
+            if buffer.strip():
+                yield buffer
+            buffer = ""
+    if buffer.strip() and not all(part.strip().startswith("--") or not part.strip()
+                                  for part in buffer.splitlines()):
+        yield buffer
+
+
+def _m1_baseline(conn: sqlite3.Connection) -> None:
+    """The v4.0 schema. Every statement is IF NOT EXISTS, so it is safe on a database that already
+    has these tables but no ``user_version`` (everything created before migrations existed)."""
+    for statement in _statements(SCHEMA):
+        conn.execute(statement)
+
+
+# Ordered, append-only: (version, function(conn)). Never edit or reorder a released migration.
+# A migration runs inside the transaction that also bumps ``user_version``: just execute SQL,
+# never commit. See "Schema migrations" in server/README.md.
+MIGRATIONS: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
+    (1, _m1_baseline),
+]
+
+
+def latest_version() -> int:
+    return MIGRATIONS[-1][0]
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def _has_tables(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                        "AND name NOT LIKE 'sqlite_%' LIMIT 1").fetchone() is not None
+
+
+def backup_to(conn: sqlite3.Connection, dest: Path) -> None:
+    """Consistent snapshot of the open database into ``dest``, even mid-write."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    target = sqlite3.connect(dest)
+    try:
+        conn.backup(target)
+    finally:
+        target.close()
+
+
+def migrate(path: Path, dry_run: bool = False) -> tuple[int, int]:
+    """Bring the database at ``path`` to the latest schema; returns ``(from_version, to_version)``.
+
+    Refuses (``SchemaTooNew``) a database from a newer server. Before changing a database that
+    already holds tables, a copy is written next to it (``<name>.pre-v<N>-<timestamp>.bak``).
+    All steps and the version bump are one transaction: a failing step leaves the file untouched.
+    With ``dry_run`` nothing is written and ``to_version`` is the version it would reach.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = connect(path)
     try:
+        current = schema_version(conn)
+        target = latest_version()
+        if current > target:
+            raise SchemaTooNew(f"La base de données est en version {current}, mais ce serveur ne connaît que la "
+                               f"version {target}. Mettez le serveur à jour (la base n'a pas été modifiée).")
+        if dry_run or current == target:
+            return current, target
         conn.execute("PRAGMA journal_mode = WAL")
-        conn.executescript(SCHEMA)
+        if _has_tables(conn):
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            backup = path.with_name(f"{path.name}.pre-v{current}-{stamp}.bak")
+            backup_to(conn, backup)
+            log.info("Sauvegarde avant migration : %s", backup)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            current = schema_version(conn)  # another process may have migrated while we waited
+            if current > target:
+                raise SchemaTooNew(f"La base de données est en version {current}, ce serveur en connaît {target}.")
+            start = current
+            for version, step in MIGRATIONS:
+                if version <= current:
+                    continue
+                step(conn)
+                conn.execute(f"PRAGMA user_version = {int(version)}")  # no bound parameters in PRAGMA
+                log.info("Migration %d appliquée", version)
+            conn.execute("COMMIT")
+        except BaseException as exc:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            if isinstance(exc, (SchemaTooNew, KeyboardInterrupt)):
+                raise
+            raise MigrationError(f"La migration de la base a échoué ({exc}); elle a été annulée.") from exc
+        return start, target
     finally:
         conn.close()
+
+
+def init(path: Path) -> None:
+    migrate(path)
 
 
 def next_seq(conn: sqlite3.Connection) -> int:

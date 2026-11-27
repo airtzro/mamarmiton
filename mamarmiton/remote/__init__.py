@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mamarmiton.remote.account import DEFAULT_SERVER_URL, Account, clear_account, load_account, save_account
-from mamarmiton.remote.client import ApiClient, ApiError, AuthError, ConflictError, OfflineError
+from mamarmiton.remote.client import ApiClient, ApiError, AuthError, ConflictError, OfflineError, UpgradeRequired
 from mamarmiton.remote.store import Conflict, RemoteStore, SyncResult
 from mamarmiton.storage import RecipeStore
 
@@ -25,5 +25,5 @@ def open_store(local_fallback: bool = True) -> tuple["RemoteStore | RecipeStore 
 
 __all__ = [
     "Account", "ApiClient", "ApiError", "AuthError", "Conflict", "ConflictError", "DEFAULT_SERVER_URL",
-    "OfflineError", "RemoteStore", "SyncResult", "clear_account", "load_account", "open_store", "save_account",
+    "OfflineError", "RemoteStore", "SyncResult", "UpgradeRequired", "clear_account", "load_account", "open_store", "save_account",
 ]

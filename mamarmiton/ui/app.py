@@ -21,7 +21,7 @@ from mamarmiton.models import DISH_TYPES, Recipe, fold
 from mamarmiton.search import Filters, search, tag_counts
 from mamarmiton.shopping import ShoppingState, build_list
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES, Settings
-from mamarmiton.remote import AuthError, OfflineError, RemoteStore, clear_account, open_store
+from mamarmiton.remote import AuthError, OfflineError, RemoteStore, UpgradeRequired, clear_account, open_store
 from mamarmiton.storage import RecipeStore
 from mamarmiton.ui.kitchen import KitchenView, keep_awake
 from mamarmiton.ui.timerbar import TimerBar
@@ -295,6 +295,7 @@ class App(ctk.CTk):
             self.after(300, lambda: messagebox.showwarning("Attention", "\n\n".join(self.store.warnings), parent=self))
         self._update_results: queue.Queue = queue.Queue()
         self._update_banner: UpdateBanner | None = None
+        self._upgrade_banner: UpdateBanner | None = None
         self.after(2000, self.start_update_check)
 
     # ------------------------------------------------------------ navigation
@@ -743,6 +744,25 @@ class App(ctk.CTk):
         self._update_banner = UpdateBanner(self, f"Une nouvelle version ({info.version}) est disponible",
                                            lambda: webbrowser.open(info.url), later)
 
+    def show_upgrade_required(self) -> None:
+        """The server refuses this version (426): say so once, without blocking the local recipes."""
+        if self._upgrade_banner is not None and self._upgrade_banner.winfo_exists():
+            return
+        message = ("Cette version de Mamarmiton est trop ancienne pour se synchroniser. Mettez-la à jour : "
+                   "vos recettes restent disponibles ici en attendant.")
+        url = [updates.RELEASES_URL]
+
+        def open_download() -> None:
+            webbrowser.open(url[0])
+
+        def forget() -> None:
+            self._upgrade_banner = None  # the sidebar keeps saying "Mise à jour nécessaire"
+
+        self._upgrade_banner = UpdateBanner(self, message, open_download, forget)
+        # the update check knows the exact release page; it is silent when offline
+        rl.run_in_thread(self, lambda: updates.check_latest(__version__),
+                         lambda info: info is not None and url.__setitem__(0, info.download_url or info.url))
+
     # ---------------------------------------------------------- account & sync
     def local_book(self) -> RecipeStore:
         """The local recipe file (kept as a backup once an account is used)."""
@@ -802,7 +822,11 @@ class App(ctk.CTk):
         """A dialog's own network call failed: reflect it in the sidebar status."""
         if not self.is_remote or self.store.status == "syncing":
             return
-        if isinstance(exc, AuthError):
+        if isinstance(exc, UpgradeRequired):
+            self.store.status = "outdated"
+            self.runner.blocked = True
+            self.show_upgrade_required()
+        elif isinstance(exc, AuthError):
             self.store.status = "auth"
         elif isinstance(exc, OfflineError):
             self.store.status = "offline"
@@ -818,6 +842,9 @@ class App(ctk.CTk):
     def on_sync_done(self, result) -> None:
         """A sync finished (called on the Tk thread)."""
         self._update_account_area()
+        if isinstance(result, UpgradeRequired) or getattr(result, "outdated", False):
+            self.show_upgrade_required()
+            return
         if isinstance(result, Exception):
             log.error("Sync failed", exc_info=result)
             return

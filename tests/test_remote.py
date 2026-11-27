@@ -459,3 +459,53 @@ def test_tags_round_trip_through_the_server(make_store, http, tmp_path):
     b.sync()
     a.sync()
     assert a.get(r.id).tags == ["rapide"]
+
+
+# ------------------------------------------------------- minimum client version
+def test_client_sends_its_version_header():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(request.headers)
+        return httpx.Response(200, json={})
+
+    from mamarmiton import __version__
+    ApiClient("http://x", http=httpx.Client(transport=httpx.MockTransport(handler))).me()
+    assert seen["x-mamarmiton-client"] == f"desktop/{__version__}"
+
+
+def test_426_from_stub_server_is_upgrade_required_and_not_a_sign_out():
+    from mamarmiton.remote import UpgradeRequired
+
+    def handler(request):
+        return httpx.Response(426, json={"detail": "Cette version de Mamarmiton est trop ancienne. Mettez-la à jour.",
+                                         "min_version": "4.1.0"})
+
+    client = ApiClient("http://x", token="t", http=httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(UpgradeRequired) as err:
+        client.me()
+    assert err.value.status == 426 and err.value.min_version == "4.1.0" and "trop ancienne" in err.value.message
+    assert isinstance(err.value, OfflineError) and not isinstance(err.value, AuthError)
+
+
+def test_outdated_app_stops_syncing_but_keeps_local_data_and_queue(make_store, settings, http):
+    store = make_store("alice")
+    r = store.add(recipe("Tarte"))
+    assert store.sync().ok
+    strict = TestClient(create_app(Settings(data_dir=settings.data_dir, min_desktop_version="99.0.0")))
+    store.client._http = strict
+    store.update(recipe_with(r, pour=8))
+    result = store.sync()
+    assert result.outdated and not result.ok and store.status == "outdated"
+    assert "trop ancienne" in result.error
+    assert store.pending_count == 1  # the edit waits in the outbox
+    assert store.get(r.id).pour == 8 and len(store) == 1  # the local cache still works
+    # once the app is updated (or the minimum lowered) the queue is delivered
+    store.client._http = http
+    assert store.sync().ok and store.pending_count == 0 and store.status == "ok"
+
+
+def recipe_with(r, **kw):
+    for k, v in kw.items():
+        setattr(r, k, v)
+    return r

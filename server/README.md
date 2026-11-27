@@ -83,6 +83,26 @@ The web page is part of the `api` image, so the update command below also update
 | Update | `git pull && docker compose up -d --build` |
 | Logs | `docker compose logs --tail 100 api caddy` |
 
+## Schema migrations and minimum client version
+
+The database carries `PRAGMA user_version`. At startup the server applies the
+missing steps of `MIGRATIONS` (in `mamarmiton_server/db.py`) in one transaction;
+a database that already holds tables is first copied to
+`mamarmiton.sqlite3.pre-v<N>-<time>.bak` next to it. A database from a *newer*
+server is refused with a clear error instead of being damaged. Manual run:
+`python -m mamarmiton_server migrate [--dry-run]`.
+
+**To add a migration:** write `def _m2_something(conn): conn.execute("ALTER TABLE ...")`
+(plain SQL, never commit), append `(2, _m2_something)` to `MIGRATIONS`, and add a
+test in `tests/test_migrations.py` that upgrades a database built at the
+previous version. Never edit or reorder a released migration, and never change
+`SCHEMA` (it is migration 1, frozen).
+
+Set `MIN_DESKTOP_VERSION=4.1.0` in `.env` to make the server answer `426` (in
+French, with `min_version`) to desktop apps older than that. Clients announce
+themselves with `X-Mamarmiton-Client: desktop/<version>`; requests without the
+header are allowed. `GET /version` returns `{"server", "min_desktop"}`.
+
 ## Security notes
 
 - Only Caddy is exposed. The API container has no published port, runs as

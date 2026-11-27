@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from mamarmiton.remote import AuthError, OfflineError
-from mamarmiton.remote.client import ApiError
+from mamarmiton.remote.client import ApiError, UpgradeRequired
 
 SYNC_INTERVAL_MS = 60_000
 DEBOUNCE_MS = 2_000
@@ -28,6 +28,8 @@ def status_line(status: str, pending: int = 0, error: str = "") -> tuple[str, st
         if pending:
             text += f" — vos changements seront envoyés plus tard ({pending} en attente)"
         return "cloud_off", text, "warn"
+    if status == "outdated":
+        return "alert", "Mise à jour nécessaire", "bad"
     if status == "auth":
         return "alert", "Reconnectez-vous", "bad"
     if status == "error":
@@ -52,6 +54,8 @@ def last_sync_text(when: datetime | None, now: datetime | None = None) -> str:
 # ------------------------------------------------------------------ errors
 def error_text(exc: BaseException) -> str:
     """A short French sentence for any failure of a network call."""
+    if isinstance(exc, UpgradeRequired):
+        return exc.message
     if isinstance(exc, OfflineError):
         return "Impossible de joindre le serveur. Vérifiez votre connexion internet, puis réessayez."
     if isinstance(exc, AuthError):
@@ -166,18 +170,20 @@ class SyncRunner:
         self.store: Any = None
         self.running = False
         self._again = False
+        self.blocked = False  # the server said this app is too old: no more syncing until restart/sign-in
         self._timer: Any = None
         self._debounce = Debouncer(widget, debounce_ms, self.sync_now)
 
     @property
     def active(self) -> bool:
-        return self.store is not None and hasattr(self.store, "sync")
+        return self.store is not None and hasattr(self.store, "sync") and not self.blocked
 
     def attach(self, store: Any) -> None:
         """Use ``store`` from now on (a local store disables syncing)."""
         self._debounce.cancel()
         self._cancel_timer()
         self.store = store
+        self.blocked = False
         if self.active:
             self.sync_now()
             self._schedule()
@@ -217,6 +223,11 @@ class SyncRunner:
 
     def _finished(self, store: Any, result: Any) -> None:
         self.running = False
+        if store is self.store and (getattr(result, "outdated", False) or isinstance(result, UpgradeRequired)):
+            self.blocked = True
+            self._again = False
+            self._debounce.cancel()
+            self._cancel_timer()
         if store is self.store:
             self.on_done(result)
         if self._again and self.active:

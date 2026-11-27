@@ -103,5 +103,5 @@ These stay off the table unless users ask for them: weekly meal planner, nutriti
 ## Tech debt
 
 - The rule-based PDF parser struggles with multi-column layouts (pdfplumber `extract_words` with x positions could rebuild the columns).
-- There is no schema migration framework yet (Phase 0).
+- Schema migrations (`PRAGMA user_version`) and the minimum desktop version (426) exist since v4.1; see server/README.md.
 - The web client has unit tests for its logic but no browser tests; add Playwright once the core flows are stable.

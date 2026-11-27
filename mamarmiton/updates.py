@@ -14,6 +14,7 @@ from datetime import date
 log = logging.getLogger(__name__)
 
 API_URL = "https://api.github.com/repos/airtzro/mamarmiton/releases/latest"
+RELEASES_URL = "https://github.com/airtzro/mamarmiton/releases/latest"
 USER_AGENT = "mamarmiton-update-check"
 
 _VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?$")
