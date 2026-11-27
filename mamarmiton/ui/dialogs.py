@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -15,7 +16,7 @@ from typing import TYPE_CHECKING, Callable
 import customtkinter as ctk
 
 from mamarmiton import __version__, config
-from mamarmiton.importers import ImportResult, import_pdf, llm, pdf_text
+from mamarmiton.importers import ImportResult, import_pdf, import_url, llm, pdf_text
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES
 from mamarmiton.ui import art, theme
 from mamarmiton.ui.widgets import Choice, Modal, ScrollFrame
@@ -75,6 +76,7 @@ class ImportDialog(Modal):
                 if kind == "progress":
                     self.status.configure(text=payload)
                 elif kind == "done":
+                    self.running = False
                     self.bar.stop()
                     self.close()
                     self.on_done(payload)
@@ -91,11 +93,121 @@ class ImportDialog(Modal):
 
 
 # --------------------------------------------------------------------------
+# Import from a recipe website
+# --------------------------------------------------------------------------
+class UrlImportDialog(Modal):
+    """Asks for a web address, then fetches it in a background thread."""
+
+    def __init__(self, master, on_done: Callable[[ImportResult], None]):
+        super().__init__(master, "Importer depuis un site", 560, 300)
+        self.resizable(False, False)
+        self.on_done = on_done
+        self.messages: queue.Queue = queue.Queue()
+        self.cancelled = False
+        self.running = False
+
+        self.box = ctk.CTkFrame(self, fg_color="transparent")
+        self.box.pack(fill="both", expand=True, padx=30, pady=26)
+        theme.heading(self.box, "Importer depuis un site", size=22).pack(anchor="w")
+        ctk.CTkLabel(self.box, text="Collez l'adresse d'une page de recette (Marmiton, 750g, Cuisine AZ…).",
+                     font=theme.font(13), text_color=theme.MUTED, anchor="w", justify="left",
+                     wraplength=490).pack(anchor="w", pady=(2, 14))
+        # placeholder only works without a textvariable, so read the entry directly
+        self.entry = theme.entry(self.box, placeholder_text="https://www.exemple.fr/recette/…")
+        self.entry.pack(fill="x")
+        self.entry.bind("<Return>", lambda _e: self._start())
+        self.error = ctk.CTkLabel(self.box, text="", font=theme.font(13), text_color=theme.DANGER, anchor="w",
+                                  justify="left", wraplength=490)
+        self.error.pack(anchor="w", pady=(8, 0))
+        self.buttons = ctk.CTkFrame(self.box, fg_color="transparent")
+        self.buttons.pack(side="bottom", fill="x")
+        theme.ghost_button(self.buttons, text="Annuler", width=110, command=self.close).pack(side="right")
+        self.go = theme.primary_button(self.buttons, text="Importer", width=130, command=self._start)
+        self.go.pack(side="right", padx=(0, 8))
+        self.after(200, self.entry.focus_set)
+
+    def close(self) -> None:
+        self.cancelled = True
+        if self.running:  # the worker keeps going: clean up its photo when it ends
+            self._discard_pending()
+        super().close()
+
+    def _start(self) -> None:
+        url = self.entry.get().strip()
+        self.error.configure(text="")
+        if not url:
+            self.error.configure(text="Collez d'abord l'adresse de la recette.")
+            return
+        self.entry.configure(state="disabled")
+        self.go.configure(state="disabled", text="Lecture…")
+        self.bar = ctk.CTkProgressBar(self.box, mode="indeterminate", height=8, corner_radius=4,
+                                      progress_color=theme.ACCENT, fg_color=theme.SURFACE_ALT)
+        self.bar.pack(fill="x", pady=(10, 0), before=self.buttons)
+        self.bar.start()
+        self.error.configure(text="Connexion au site…", text_color=theme.MUTED)
+
+        def worker():
+            try:
+                result = import_url(url, progress=lambda m: self.messages.put(("progress", m)))
+                self.messages.put(("done", result))
+            except Exception as exc:
+                if not isinstance(exc, ValueError):
+                    log.exception("URL import failed")
+                    exc = ValueError("Une erreur inattendue est survenue pendant la lecture de la page.")
+                self.messages.put(("error", exc))
+
+        self.running = True
+        threading.Thread(target=worker, daemon=True).start()
+        self.after(100, self._poll)
+
+    def _poll(self) -> None:
+        try:
+            while True:
+                kind, payload = self.messages.get_nowait()
+                if kind == "progress":
+                    self.error.configure(text=payload)
+                elif kind == "done":
+                    self.running = False
+                    self.bar.stop()
+                    self.close()
+                    self.on_done(payload)
+                    return
+                else:  # let the user fix the address and try again
+                    self.running = False
+                    self.bar.stop()
+                    self.bar.pack_forget()
+                    self.entry.configure(state="normal")
+                    self.go.configure(state="normal", text="Importer")
+                    self.error.configure(text=str(payload), text_color=theme.DANGER)
+                    return
+        except queue.Empty:
+            pass
+        self.after(150, self._poll)
+
+    def _discard_pending(self) -> None:
+        """The window was closed while fetching: drop any downloaded photo once the worker ends."""
+        def check(tries=0):
+            try:
+                kind, payload = self.messages.get_nowait()
+            except queue.Empty:
+                if tries < 200:
+                    self.master.after(150, check, tries + 1)
+                return
+            if kind == "done":
+                for folder in {p.parent for p in payload.images}:
+                    shutil.rmtree(folder, ignore_errors=True)
+            elif kind == "progress":
+                check(tries)
+        self.master.after(150, check)
+
+
+# --------------------------------------------------------------------------
 # Help & settings
 # --------------------------------------------------------------------------
 HELP_ITEMS = [
     ("plus", "Ajouter une recette", "Bouton « Nouvelle recette » en bas à gauche, ou Ctrl+N. Pour chaque ingrédient : le nom, la quantité, puis l'unité. Entrée passe à la case suivante ; Ctrl+S enregistre."),
     ("pdf", "Importer un PDF", "L'application lit le PDF, puis vous montre la recette pour vérification avant de l'enregistrer."),
+    ("globe", "Importer depuis un site", "Collez l'adresse d'une page de recette : l'application la lit, puis vous la montre pour vérification."),
     ("search", "Retrouver une recette", "Tapez un mot dans la barre de recherche (Ctrl+F). Les catégories à gauche et les filtres affinent la liste."),
     ("pot", "Cuisiner avec ce qu'on a", "Écrivez vos ingrédients dans « J'ai dans le frigo » : seules les recettes qui les utilisent restent."),
     ("users", "Changer le nombre de personnes", "Boutons − et + sur la page d'une recette. Les quantités s'adaptent, la recette enregistrée ne change pas."),

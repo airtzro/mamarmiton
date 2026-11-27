@@ -317,13 +317,15 @@ class HomeView(ctk.CTkFrame):
         row = ctk.CTkFrame(inner, fg_color="transparent")
         if total == 0:
             theme.heading(inner, "Votre carnet est encore vide", size=26).pack()
-            ctk.CTkLabel(inner, text="Ajoutez votre première recette, en l'écrivant ou depuis un PDF.",
+            ctk.CTkLabel(inner, text="Ajoutez votre première recette, en l'écrivant, depuis un PDF ou depuis un site.",
                          font=theme.font(15), text_color=theme.MUTED).pack(pady=(8, 22))
             row.pack()
             theme.primary_button(row, text="Écrire une recette", image=art.icon("pencil", theme.ON_ACCENT, 17),
                                  compound="left", width=200, command=self.app.new_recipe).pack(side="left", padx=6)
             theme.secondary_button(row, text="Importer un PDF", image=art.icon("pdf", theme.TEXT, 17),
                                    compound="left", width=190, command=self.app.import_pdf).pack(side="left", padx=6)
+            theme.secondary_button(row, text="Importer depuis un site", image=art.icon("globe", theme.TEXT, 17),
+                                   compound="left", width=230, command=self.app.import_url).pack(side="left", padx=6)
         elif filtered:
             theme.heading(inner, "Aucune recette ne correspond", size=26).pack()
             ctk.CTkLabel(inner, text="Essayez un autre mot, ou enlevez un filtre.",

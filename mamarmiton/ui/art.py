@@ -124,6 +124,10 @@ def _draw_icon(name: str, color: str) -> Image.Image:
         _stroke(d, pts((14, 3), (6, 3), (6, 21), (18, 21), (18, 7), (14, 3)), w, c)
         _stroke(d, pts((12, 17.5), (12, 10.5)), w, c)
         _stroke(d, pts((9, 13), (12, 10), (15, 13)), w, c)
+    elif name == "globe":
+        d.ellipse(box(3, 3, 21, 21), outline=c, width=w)
+        d.ellipse(box(8.5, 3, 15.5, 21), outline=c, width=w)
+        _stroke(d, pts((3, 12), (21, 12)), w, c)
     elif name == "settings":
         for y, knob in ((6, 15), (12, 8), (18, 13)):
             _stroke(d, pts((4, y), (20, y)), w, c)

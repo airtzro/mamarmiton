@@ -22,7 +22,7 @@ from mamarmiton.ui import art, remote_logic as rl, theme
 from mamarmiton.ui.account import AccountDialog
 from mamarmiton.ui.conflicts import ConflictDialog
 from mamarmiton.ui.detail import DetailView
-from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, ask_image, ask_pdf
+from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, UrlImportDialog, ask_image, ask_pdf
 from mamarmiton.ui.editor import EditorView
 from mamarmiton.ui.home import HomeView
 from mamarmiton.ui.widgets import IconLine, NavItem, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
@@ -71,7 +71,12 @@ class Sidebar(ctk.CTkFrame):
         ctk.CTkButton(bottom, text="Importer un PDF", image=art.icon("pdf", theme.SIDEBAR_TEXT, 18), compound="left",
                       height=44, corner_radius=theme.RADIUS, fg_color="transparent", hover_color=theme.SIDEBAR_HOVER,
                       border_width=1, border_color=theme.SIDEBAR_LINE, text_color=theme.SIDEBAR_TEXT,
-                      font=theme.font(14, "bold"), command=app.import_pdf).pack(fill="x", pady=(8, 14))
+                      font=theme.font(14, "bold"), command=app.import_pdf).pack(fill="x", pady=(8, 0))
+        ctk.CTkButton(bottom, text="Importer depuis un site", image=art.icon("globe", theme.SIDEBAR_TEXT, 18),
+                      compound="left", height=44, corner_radius=theme.RADIUS, fg_color="transparent",
+                      hover_color=theme.SIDEBAR_HOVER, border_width=1, border_color=theme.SIDEBAR_LINE,
+                      text_color=theme.SIDEBAR_TEXT, font=theme.font(14, "bold"),
+                      command=app.import_url).pack(fill="x", pady=(8, 14))
         ctk.CTkFrame(bottom, height=1, fg_color=theme.SIDEBAR_LINE, corner_radius=0).pack(fill="x", pady=(0, 8))
         help_row = self._help_row = ctk.CTkFrame(bottom, fg_color="transparent")
         help_row.pack(fill="x")
@@ -396,11 +401,20 @@ class App(ctk.CTk):
         if path:
             ImportDialog(self, path, self.settings.use_ai, self._review_import)
 
+    def import_url(self) -> None:
+        if not self.can_leave_editor():
+            return
+        UrlImportDialog(self, self._review_import)
+
     def _review_import(self, result: ImportResult) -> None:
-        notes = [f"Recette lue {'par l’IA' if result.method == 'IA' else 'automatiquement'} : vérifiez-la avant d'enregistrer."]
+        if result.method == "site":
+            notes = ["Recette lue depuis le site : vérifiez-la avant d'enregistrer."]
+        else:
+            notes = [f"Recette lue {'par l’IA' if result.method == 'IA' else 'automatiquement'} : vérifiez-la avant d'enregistrer."]
         notes += result.warnings
         if result.images:
-            notes.append(f"{len(result.images)} photo(s) trouvée(s) dans le PDF seront ajoutées.")
+            origin = "le site" if result.method == "site" else "le PDF"
+            notes.append(f"{len(result.images)} photo(s) trouvée(s) dans {origin} seront ajoutées.")
 
         def save(recipe: Recipe) -> None:
             self.store.add(recipe)
