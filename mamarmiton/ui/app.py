@@ -29,11 +29,11 @@ from mamarmiton.ui import art, remote_logic as rl, theme
 from mamarmiton.ui.account import AccountDialog
 from mamarmiton.ui.conflicts import ConflictDialog
 from mamarmiton.ui.detail import DetailView
-from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, UrlImportDialog, ask_image, ask_pdf
+from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, ReportDialog, UrlImportDialog, ask_image, ask_pdf
 from mamarmiton.ui.editor import EditorView
 from mamarmiton.ui.home import HomeView
 from mamarmiton.ui.shopping import ShoppingView
-from mamarmiton.ui.widgets import IconLine, NavItem, ScrollFrame, Toast, UpdateBanner, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
+from mamarmiton.ui.widgets import IconLine, NavItem, ReportButton, ScrollFrame, Toast, UpdateBanner, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
 
 log = logging.getLogger(__name__)
 
@@ -281,6 +281,8 @@ class App(ctk.CTk):
         self.current: ctk.CTkFrame | None = None
         self.timers = TimerBar(self)  # lives here so running timers survive changing screens
         self.kitchen: KitchenView | None = None
+        self.report_button = ReportButton(self, self.report_problem, content_left=Sidebar.WIDTH)
+        self.report_button.show()
         self._before_editor: Recipe | None = None  # recipe to return to when the editor closes
 
         self.bind_all("<Control-n>", lambda _e: self.new_recipe())
@@ -441,6 +443,7 @@ class App(ctk.CTk):
             return
         usage.hit("kitchen_open")
         self.kitchen = KitchenView(self, recipe, servings)
+        self.report_button.hide()  # kitchen mode keeps the corners for its own big buttons
         self.timers.dock(True)
         keep_awake(True)
 
@@ -449,6 +452,7 @@ class App(ctk.CTk):
             return
         self.kitchen.destroy()
         self.kitchen = None
+        self.report_button.show()
         self.timers.dock(False)
         keep_awake(False)
 
@@ -689,6 +693,9 @@ class App(ctk.CTk):
 
     def show_help(self) -> None:
         HelpDialog(self, self)
+
+    def report_problem(self) -> None:
+        ReportDialog(self, self)
 
     def export_recipes(self) -> None:
         path = filedialog.asksaveasfilename(parent=self, title="Exporter les recettes", defaultextension=".json",

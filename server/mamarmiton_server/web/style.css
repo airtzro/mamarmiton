@@ -355,6 +355,20 @@ body.kitchen-open { overflow: hidden; }
 .book-option.is-current .book-option-count { color: inherit; }
 @media (max-width: 520px) { .book-switch-kicker { display: none; } .book-switch-btn { min-height: 54px; } }
 
+/* "Signaler un problème": bottom right, like a website's help button; just the icon on phones */
+main { padding-bottom: 72px; }
+.report-fab { position: fixed; z-index: 30; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 60px; min-width: 60px; padding: 8px 20px 8px 16px;
+  font: inherit; font-weight: 700; cursor: pointer; color: var(--bar-text); background: var(--bar); border: 2px solid var(--bar-accent);
+  border-radius: 999px; box-shadow: 0 6px 24px rgb(0 0 0 / .35); }
+.report-fab:hover { background: var(--bar-hover); }
+.report-fab:focus-visible { outline-color: #FFD9C7; }
+.report-fab .icon { color: var(--bar-accent); flex: none; }
+.kitchen-open .report-fab { display: none; }
+@media (max-width: 760px) { .report-fab { padding: 0; width: 60px; } .report-fab-label { display: none; } }
+@media (max-width: 760px) { .book-switch { max-width: calc(100vw - 108px); } }
+@media print { .report-fab { display: none; } }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
 @media print {
   .topbar, .actions, .btn, .toasts, .banner, .offline-badge, .fav-btn, .book-switch { display: none !important; }

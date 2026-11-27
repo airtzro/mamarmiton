@@ -60,8 +60,10 @@ def test_main_window_navigation():
 def _kitchen_walk(app, recipe_id):
     import time
 
+    assert app.report_button.winfo_ismapped()  # bottom-right "Signaler un problème"
     app.open_kitchen(app.store.get(recipe_id))
     _pump(app)
+    assert not app.report_button.winfo_ismapped()  # kitchen mode uses the corners itself
     k = app.kitchen
     assert k is not None and k.counter.cget("text") == "Étape 1 / 2"
     assert str(k.btn_prev.cget("state")) == "disabled"
@@ -83,6 +85,7 @@ def _kitchen_walk(app, recipe_id):
     app._kitchen_key("close")
     _pump(app)
     assert app.kitchen is None
+    assert app.report_button.winfo_ismapped()
 
     # the timer survives leaving the recipe, and rings when it ends
     app.go_home()
@@ -95,3 +98,24 @@ def _kitchen_walk(app, recipe_id):
     assert timer.finished and "Terminé" in timer.text.cget("text")
     app.timers.cancel(timer)
     assert not app.timers.timers
+
+
+def test_report_button_shrinks_when_narrow():
+    from mamarmiton.ui.app import App
+    try:
+        app = App()
+    except tkinter.TclError as exc:
+        pytest.skip(f"no usable display: {exc}")
+    try:
+        _pump(app)
+        button = app.report_button
+        button.set_compact(False)
+        assert button.cget("text") == "Signaler un problème"
+        button.set_compact(True)
+        assert button.cget("text") == ""
+        opened = []
+        button.configure(command=lambda: opened.append(True))
+        button.invoke()
+        assert opened
+    finally:
+        app.destroy()

@@ -157,6 +157,12 @@ def _draw_icon(name: str, color: str) -> Image.Image:
         _stroke(d, pts((12.4, 12.9), (12, 14)), w, c)
         r = 1.3 * s
         d.ellipse((12 * s - r, 17 * s - r, 12 * s + r, 17 * s + r), fill=c)
+    elif name == "message":  # speech bubble with three dots
+        d.rounded_rectangle(box(3, 4, 21, 17), radius=3 * s, outline=c, width=w)
+        _stroke(d, pts((8, 17), (7.5, 21), (12.5, 17)), w, c)
+        for x in (8, 12, 16):
+            r = 1.3 * s
+            d.ellipse((x * s - r, 10.5 * s - r, x * s + r, 10.5 * s + r), fill=c)
     elif name == "reset":
         d.arc(box(4.5, 4.5, 19.5, 19.5), 210, 140, fill=c, width=w)
         _stroke(d, pts((4.5, 4), (5, 9), (10, 8.5)), w, c)

@@ -232,6 +232,62 @@ class Toast(ctk.CTkFrame):
         self._finish(self._on_expire)
 
 
+class ReportButton(ctk.CTkButton):
+    """"Signaler un problème", floating in the bottom-right corner like a website's help button.
+
+    Shrinks to a round icon when the content area is narrow, so it never hides half the page.
+    """
+
+    LABEL = "Signaler un problème"
+    SIZE = 52
+    MARGIN = 20
+    RIGHT = 34  # clear of the page's scrollbar
+    COMPACT_BELOW = 620  # content width, in unscaled pixels
+
+    def __init__(self, master, command: Callable[[], None], content_left: int = 0):
+        super().__init__(master, text=self.LABEL, image=art.icon("message", theme.SIDEBAR_ACCENT, 20),
+                         compound="left", height=self.SIZE, corner_radius=self.SIZE // 2, border_spacing=10,
+                         fg_color=theme.SIDEBAR, hover_color=theme.SIDEBAR_HOVER, text_color=theme.SIDEBAR_TEXT,
+                         border_width=2, border_color=theme.SIDEBAR_ACCENT, bg_color=theme.BG,
+                         font=theme.font(14, "bold"), command=command)
+        self._content_left = content_left
+        self._compact: bool | None = None
+        self._shown = False
+        master.bind("<Configure>", self._on_resize, add="+")
+
+    def show(self) -> None:
+        self._shown = True
+        self.place(relx=1.0, rely=1.0, anchor="se", x=-self.RIGHT, y=-self.MARGIN)
+        self.lift()
+
+    def hide(self) -> None:
+        self._shown = False
+        self.place_forget()
+
+    def _on_resize(self, event) -> None:
+        if event.widget is not self.master:  # a root binding also fires for every child
+            return
+        scaling = ctk.ScalingTracker.get_widget_scaling(self)
+        self.set_compact(event.width / scaling - self._content_left < self.COMPACT_BELOW)
+
+    def _create_grid(self) -> None:
+        super()._create_grid()
+        if getattr(self, "_compact", False):  # customtkinter reserves corner_radius on both sides: a circle needs 0
+            self.grid_columnconfigure(0, minsize=0)
+            self.grid_columnconfigure(4, minsize=0)
+
+    def set_compact(self, compact: bool) -> None:
+        if compact == self._compact:
+            return
+        self._compact = compact
+        if compact:
+            self.configure(text="", compound="center", width=self.SIZE, border_spacing=0)
+        else:
+            self.configure(text=self.LABEL, compound="left", width=0, border_spacing=10)
+        if self._shown:
+            self.lift()
+
+
 class UpdateBanner(ctk.CTkFrame):
     """A discreet "new version" notice at the bottom of the window with two buttons."""
 

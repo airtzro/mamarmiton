@@ -11,7 +11,7 @@ import { renderDetail } from "./detail.js";
 import { leaveCookMode } from "./kitchen.js";
 import { clearShopping, renderCourses } from "./courses.js";
 import { renderEditor } from "./editor.js";
-import { openAccountDialog } from "./account.js";
+import { openAccountDialog, openReportDialog } from "./account.js";
 
 const root = document.getElementById("root");
 let view = null;       // {update()} of the screen showing
@@ -116,7 +116,10 @@ function buildShell() {
       h("button", { class: "btn btn-topbar", type: "button", "aria-label": "Mon compte", onClick: () => openAccountDialog({ onSignOut: signOut }) },
         icon("user", 22), h("span", { class: "btn-label", text: state.me.display_name || state.me.username }))));
   main = h("main", { id: "main", tabindex: "-1" });
-  clear(root).append(topbar, main);
+  // bottom-right, where websites put their help button
+  const report = h("button", { class: "report-fab", type: "button", "aria-label": "Signaler un problème", title: "Signaler un problème",
+    onClick: openReportDialog }, icon("message", 24), h("span", { class: "report-fab-label", text: "Signaler un problème" }));
+  clear(root).append(topbar, main, report);
 }
 
 // ----------------------------------------------------------------- routing

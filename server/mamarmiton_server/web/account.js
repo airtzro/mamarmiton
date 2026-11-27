@@ -11,6 +11,47 @@ function field(label, input) {
   return h("div", { class: "field" }, h("label", { for: id, text: label }), input);
 }
 
+/**
+ * The "Signaler un problème" form, drawn into `body`. `back` runs on the secondary button,
+ * `sent` once the message is delivered.
+ */
+function buildReportForm(body, { back, backText, sent }) {
+  const message = h("textarea", { rows: 6, maxlength: 4000, required: true, "aria-label": "Votre message",
+    placeholder: "Décrivez ce qui s'est passé, avec vos mots." });
+  const attach = h("input", { type: "checkbox", id: "report-log", checked: true });
+  const error = h("p", { class: "form-error", role: "alert" });
+  const send = h("button", { class: "btn btn-primary", type: "submit", text: "Envoyer" });
+  const form = h("form", { class: "stack", novalidate: true },
+    h("p", { text: "Votre message arrive directement à la personne qui s'occupe de Mamarmiton." }),
+    message,
+    h("label", { class: "row", for: "report-log" }, attach, h("span", { text: "Joindre le journal des erreurs (aide à comprendre)" })),
+    error,
+    h("div", { class: "row end wrap" }, h("button", { class: "btn btn-secondary", type: "button", onClick: back, text: backText }), send));
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    if (!message.value.trim()) { error.textContent = "Écrivez quelques mots avant d'envoyer."; return; }
+    await busy(send, async () => {
+      try { await api.sendReport(buildReport(message.value, attach.checked)); toast("Merci, votre message a été envoyé.", "ok"); sent(); }
+      catch (err) { error.textContent = err.offline ? "Pas de connexion pour le moment. Réessayez plus tard." : err.message; }
+    });
+  });
+  clear(body).append(form);
+  message.focus();
+}
+
+/** "Signaler un problème" on its own, from the floating button in the bottom-right corner. */
+export function openReportDialog() {
+  openDialog({
+    title: "Signaler un problème",
+    build: (close) => {
+      const body = h("div");
+      queueMicrotask(() => buildReportForm(body, { back: close, backText: "Annuler", sent: close }));
+      return body;
+    },
+  });
+}
+
 /** "Mon compte": change password, invitation (admin), sign out. */
 export function openAccountDialog({ onSignOut }) {
   openDialog({
@@ -44,30 +85,7 @@ export function openAccountDialog({ onSignOut }) {
           privacy, signOut);
       }
 
-      function reportForm() {
-        const message = h("textarea", { rows: 6, maxlength: 4000, required: true, "aria-label": "Votre message",
-          placeholder: "Décrivez ce qui s'est passé, avec vos mots." });
-        const attach = h("input", { type: "checkbox", id: "report-log", checked: true });
-        const error = h("p", { class: "form-error", role: "alert" });
-        const send = h("button", { class: "btn btn-primary", type: "submit", text: "Envoyer" });
-        const form = h("form", { class: "stack", novalidate: true },
-          h("p", { text: "Votre message arrive directement à la personne qui s'occupe de Mamarmiton." }),
-          message,
-          h("label", { class: "row", for: "report-log" }, attach, h("span", { text: "Joindre le journal des erreurs (aide à comprendre)" })),
-          error,
-          h("div", { class: "row end wrap" }, h("button", { class: "btn btn-secondary", type: "button", onClick: home, text: "Retour" }), send));
-        form.addEventListener("submit", async (e) => {
-          e.preventDefault();
-          error.textContent = "";
-          if (!message.value.trim()) { error.textContent = "Écrivez quelques mots avant d'envoyer."; return; }
-          await busy(send, async () => {
-            try { await api.sendReport(buildReport(message.value, attach.checked)); toast("Merci, votre message a été envoyé.", "ok"); home(); }
-            catch (err) { error.textContent = err.offline ? "Pas de connexion pour le moment. Réessayez plus tard." : err.message; }
-          });
-        });
-        clear(body).append(form);
-        message.focus();
-      }
+      function reportForm() { buildReportForm(body, { back: home, backText: "Retour", sent: home }); }
 
       function passwordForm() {
         const old = h("input", { type: "password", autocomplete: "current-password", required: true });
