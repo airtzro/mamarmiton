@@ -1,6 +1,6 @@
 import { api } from "./api.js";
 import { h, icon, clear } from "./dom.js";
-import { applyEntry, canEdit, getRecipe, newId, photos, state, sync } from "./state.js";
+import { applyEntry, canEdit, getRecipe, newId, photos, saveRecipe, setFavorite, state, sync } from "./state.js";
 import { COMMON_UNITS, joinAmountUnit, splitAmountUnit } from "./quantities.js";
 import { COOKING_TYPES, DISH_TYPES } from "./search.js";
 import { busy, confirmDialog, openDialog, toast } from "./ui.js";
@@ -187,7 +187,17 @@ export function renderEditor(main, id, { done, cancel }) {
         let baseVersion = entry ? entry.version : null;
         for (;;) {
           try {
-            result = await api.putRecipe(recipeId, recipe, baseVersion);
+            const saved = await saveRecipe(recipeId, recipe, baseVersion);
+            if (saved.queued) {
+              if (pending.length || removedImages.size) toast("Les photos n'ont pas pu être modifiées hors ligne : ajoutez-les une fois la connexion revenue.", "error");
+              if (fav.checked !== (existing?.favori ?? false)) await setFavorite(recipeId, fav.checked);
+              toast("Recette enregistrée sur cet appareil. Elle sera envoyée au retour de la connexion.", "ok");
+              pending.forEach((p) => URL.revokeObjectURL(p.url));
+              pending.length = 0;
+              done(recipeId);
+              return;
+            }
+            result = saved.entry;
             break;
           } catch (e) {
             if (e.status !== 409 || !e.detail || typeof e.detail !== "object" || !e.detail.current) throw e;
@@ -205,8 +215,7 @@ export function renderEditor(main, id, { done, cancel }) {
         applyEntry(result);
         if (fav.checked !== (existing?.favori ?? false)) {
           try {
-            await api.setFavorite(recipeId, fav.checked);
-            if (fav.checked) state.favorites.add(recipeId); else state.favorites.delete(recipeId);
+            await setFavorite(recipeId, fav.checked);
           } catch (e) { toast(e.message, "error"); }
         }
         let failed = 0, n = 0;

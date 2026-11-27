@@ -1,6 +1,6 @@
 import { api } from "./api.js";
 import { h, icon, clear } from "./dom.js";
-import { canEdit, displayName, dropRecipe, getRecipe, photos, state, sync } from "./state.js";
+import { canEdit, deleteRecipe, displayName, getRecipe, photos, state, sync } from "./state.js";
 import { frac, scaleQuantity } from "./quantities.js";
 import { formatMinutes } from "./search.js";
 import { busy, confirmDialog, openDialog, toast } from "./ui.js";
@@ -98,10 +98,9 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
         if (!ok) return;
         await busy(del, async () => {
           try {
-            await api.deleteRecipe(id);
-            dropRecipe(id);
+            const { queued } = await deleteRecipe(id);
             servingsMemo.delete(id);
-            toast("Recette supprimée.", "ok");
+            toast(queued ? "Recette supprimée sur cet appareil. Elle le sera partout au retour de la connexion." : "Recette supprimée.", "ok");
             location.hash = "#/";
           } catch (e) { toast(e.message, "error"); }
         });

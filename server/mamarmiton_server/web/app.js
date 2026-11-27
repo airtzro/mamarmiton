@@ -1,7 +1,8 @@
 import { api, setHandlers, token } from "./api.js";
 import { h, icon, clear } from "./dom.js";
-import { resetState, state, sync } from "./state.js";
-import { hasOpenDialog, initTheme, isDark, setBanner, toast, toggleTheme } from "./ui.js";
+import { hydrate, pendingCount, persist, resetState, state, sync } from "./state.js";
+import * as store from "./offline.js";
+import { hasOpenDialog, initTheme, isDark, setOffline, toast, toggleTheme } from "./ui.js";
 import { renderLogin } from "./login.js";
 import { renderHome } from "./home.js";
 import { leaveCookMode, renderDetail } from "./detail.js";
@@ -19,12 +20,29 @@ let loggedIn = false;
 initTheme();
 
 // ------------------------------------------------------------------ session
+let offline = false;
+const paintOffline = () => setOffline(offline, pendingCount);
+function setOnline(ok) {
+  const wasOffline = offline;
+  offline = !ok;
+  paintOffline();
+  if (wasOffline && ok && loggedIn) { lastSync = 0; refresh(); }
+}
+window.addEventListener("mamarmiton:pending", paintOffline);
 setHandlers({
-  network: (ok) => setBanner(ok ? "" : "Pas de connexion à Internet : vous pouvez lire vos recettes, mais pas les modifier."),
+  network: setOnline,
   unauthorized: (message) => { if (loggedIn) showLogin("Votre session a expiré. Reconnectez-vous."); void message; },
 });
-window.addEventListener("offline", () => setBanner("Pas de connexion à Internet : vous pouvez lire vos recettes, mais pas les modifier."));
-window.addEventListener("online", () => { setBanner(""); refresh(); });
+window.addEventListener("offline", () => setOnline(false));
+window.addEventListener("online", () => { lastSync = 0; refresh(); });
+
+// the service worker keeps the page itself and the photos available without a connection
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => { navigator.serviceWorker.register("/app/sw.js", { scope: "/" }).catch(() => {}); });
+}
+function forgetPhotosOnDevice() {
+  try { if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: "clear-photos" }); } catch { /* ignore */ }
+}
 
 function showLogin(message = "") {
   loggedIn = false;
@@ -39,26 +57,38 @@ function showLogin(message = "") {
 }
 
 async function signOut() {
+  const name = state.me && state.me.username;
+  if (name) await store.clearUser(name);  // this user's copy and unsent edits leave the device
+  forgetPhotosOnDevice();
   showLogin("");
 }
 
 async function start(user) {
   state.me = user;
   loggedIn = true;
+  void store.saveMe(user);
   buildShell();
+  // show the copy kept on the device straight away, then catch up with the server
+  const cached = await hydrate(user.username);
+  if (!loggedIn) return;
+  if (cached) route();
+  paintOffline();
   try {
     state.users = await api.users();
   } catch { /* shared lists simply stay empty until the next refresh */ }
+  let changed = null;
   try {
-    await sync();
+    changed = await sync();
+    await persist();
   } catch (e) {
     if (!loggedIn) return;
-    toast(e.message, "error");
+    if (!e.offline) toast(e.message, "error");
   }
   lastSync = Date.now();
   clearInterval(timer);
   timer = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 60000);
-  route();
+  if (!cached) route();
+  else afterChange(changed);
 }
 
 // ------------------------------------------------------------------- shell
@@ -131,6 +161,13 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 (async function boot() {
   if (!token.get()) { showLogin(); return; }
   try {
+    // a known user on this device opens at once; the server is asked in the background
+    const known = await store.loadMe();
+    if (known && known.username) {
+      void api.me().then((user) => { if (loggedIn && user.username === known.username) state.me = user; }).catch(() => {});
+      await start(known);
+      return;
+    }
     const user = await api.me();
     await start(user);
   } catch (e) {

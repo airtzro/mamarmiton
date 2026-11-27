@@ -1,6 +1,5 @@
-import { api } from "./api.js";
 import { h, icon, clear } from "./dom.js";
-import { allRecipes, canEdit, displayName, photos, state } from "./state.js";
+import { allRecipes, canEdit, displayName, photos, setFavorite, state } from "./state.js";
 import { DISH_TYPES, SORTS, formatMinutes, search, totalTime } from "./search.js";
 import { toast } from "./ui.js";
 import { openShareDialog } from "./share.js";
@@ -42,8 +41,7 @@ export function cover(recipe, size = "card") {
 export async function toggleFavorite(recipe, onDone) {
   const on = !recipe.favori;
   try {
-    await api.setFavorite(recipe.id, on);
-    if (on) state.favorites.add(recipe.id); else state.favorites.delete(recipe.id);
+    await setFavorite(recipe.id, on);
     onDone();
   } catch (e) { toast(e.message, "error"); }
 }
