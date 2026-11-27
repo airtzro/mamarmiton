@@ -13,7 +13,7 @@ from mamarmiton.ui import art, theme
 from mamarmiton.ui.remote_logic import (
     error_text, format_date, last_sync_text, normalize_server_url, run_in_thread, status_line, upload_candidates,
 )
-from mamarmiton.ui.sharing import READ, WRITE, ShareDialog
+from mamarmiton.ui.sharing import ShareDialog, level_of
 from mamarmiton.ui.widgets import Choice, IconLine, Modal, ScrollFrame
 
 if TYPE_CHECKING:
@@ -452,10 +452,43 @@ class AccountDialog(Modal):
             words.grid(row=0, column=0, sticky="w", padx=6)
             ctk.CTkLabel(words, text=f"Carnet de {book.get('display_name') or book['username']}",
                          font=theme.font(14, "bold"), text_color=theme.TEXT, anchor="w").pack(anchor="w")
-            ctk.CTkLabel(words, text=WRITE if book.get("can_edit") else READ, font=theme.font(12),
+            ctk.CTkLabel(words, text=level_of(book), font=theme.font(12),
                          text_color=theme.MUTED, anchor="w").pack(anchor="w")
             theme.secondary_button(row, text="Ne plus voir", width=0, height=36,
                                    command=lambda b=book: self._leave(b)).grid(row=0, column=1, padx=(8, 4))
+        hidden = shares.get("hidden", [])
+        if hidden:
+            ctk.CTkLabel(self.received, text="Recettes retirées de ma liste", font=theme.font(14, "bold"),
+                         text_color=theme.TEXT, anchor="w").pack(anchor="w", padx=6, pady=(12, 2))
+        for item in hidden:
+            row = ctk.CTkFrame(self.received, fg_color="transparent")
+            row.pack(fill="x", pady=3)
+            row.grid_columnconfigure(0, weight=1)
+            words = ctk.CTkFrame(row, fg_color="transparent")
+            words.grid(row=0, column=0, sticky="w", padx=6)
+            ctk.CTkLabel(words, text=item.get("nom") or "Recette sans nom", font=theme.font(14),
+                         text_color=theme.TEXT, anchor="w").pack(anchor="w")
+            ctk.CTkLabel(words, text=f"Carnet de {item.get('display_name') or item['username']}", font=theme.font(12),
+                         text_color=theme.MUTED, anchor="w").pack(anchor="w")
+            theme.secondary_button(row, text="Remettre", width=0, height=36,
+                                   command=lambda i=item: self._unhide(i)).grid(row=0, column=1, padx=(8, 4))
+
+    def _unhide(self, item: dict) -> None:
+        client = self.app.store.client
+
+        def work():
+            client.set_hidden(item["recipe_id"], False)
+            return client.shares()
+
+        def failed(exc):
+            messagebox.showerror("Recette partagée", error_text(exc), parent=self)
+            self.app.note_network_error(exc)
+
+        def done(shares):
+            self._show_received(shares)
+            self.app.sync_now()
+
+        run_in_thread(self, work, done, failed)
 
     def _leave(self, book: dict) -> None:
         name = book.get("display_name") or book["username"]

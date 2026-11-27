@@ -162,3 +162,20 @@ def test_no_minimum_by_default(tmp_path):
     http = TestClient(create_app(Settings(data_dir=tmp_path)))
     assert http.get("/version").json()["min_desktop"] is None
     assert http.get("/health", headers={"X-Mamarmiton-Client": "desktop/0.0.1"}).status_code == 200
+
+
+def test_v2_reports_become_bugs(tmp_path):
+    """Messages sent before labels existed were all "Signaler un problème": they get the bug label."""
+    path = tmp_path / "x.sqlite3"
+    old_database(path)
+    conn = db.connect(path)
+    for version_, step in db.MIGRATIONS[1:2]:
+        step(conn)
+    conn.execute("PRAGMA user_version = 2")
+    conn.execute("INSERT INTO reports (user_id, created_at, message) VALUES (1, 't', 'ça plante')")
+    conn.commit()
+    conn.close()
+    assert db.migrate(path) == (2, db.latest_version())
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT message, category, category_other FROM reports").fetchall() == [("ça plante", "bug", "")]
+    conn.close()

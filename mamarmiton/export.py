@@ -19,7 +19,7 @@ from typing import Callable, Iterable
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from mamarmiton import config
-from mamarmiton.models import DEFAULT_COOKING, Recipe, format_minutes
+from mamarmiton.models import DEFAULT_COOKING, Recipe, format_minutes, servings_text
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def _meta_parts(r: Recipe) -> list[str]:
     if cook:
         parts.append(" · ".join(cook) if len(cook) == 1 else f"{cook[0]} ({cook[1]})")
     if r.pour:
-        parts.append(f"Pour {r.pour} personne{'s' if r.pour > 1 else ''}")
+        parts.append(f"Pour {servings_text(r.pour, r.pour_unite)}")
     return parts
 
 
@@ -359,30 +359,33 @@ def _draw_source(lay: _Layout, r: Recipe) -> None:
     lay.paragraph_lines(wrap_text(f"Source : {source}", font, lay.content_w), font, lay.margin, fill=GREY, factor=1.15)
 
 
-def _draw_footers(lay: _Layout, first: int) -> None:
+def _draw_footers(lay: _Layout, first: int, credit: str = "") -> None:
     pages = lay.pages[first:]
     font = lay.f("body", 8.5)
+    lead = f"{credit} · " if credit else ""
     for i, img in enumerate(pages, 1):
         d = ImageDraw.Draw(img)
         y = lay.h - lay.margin + round(2 * lay.mm)
         d.line((lay.margin, y - round(3 * lay.mm), lay.w - lay.margin, y - round(3 * lay.mm)), fill=LIGHT, width=1)
-        d.text((lay.w // 2, y), f"MAMARMITON · page {i}/{len(pages)}", font=font, fill=GREY, anchor="ma")
+        d.text((lay.w // 2, y), f"{lead}MAMARMITON · page {i}/{len(pages)}", font=font, fill=GREY, anchor="ma")
 
 
-def _render_into(lay: _Layout, recipe: Recipe, photo_path) -> None:
+def _render_into(lay: _Layout, recipe: Recipe, photo_path, credit: str = "") -> None:
     first = len(lay.pages) - 1
     _draw_header(lay, recipe, photo_path)
     _draw_ingredients(lay, recipe)
     _draw_steps(lay, recipe)
     _draw_notes(lay, recipe)
     _draw_source(lay, recipe)
-    _draw_footers(lay, first)
+    _draw_footers(lay, first, credit)
 
 
-def render_recipe_pages(recipe: Recipe, photo_path: Path | str | None = None, *, dpi: int = 150) -> list[Image.Image]:
-    """Render ``recipe`` as a list of A4 portrait RGB page images."""
+def render_recipe_pages(recipe: Recipe, photo_path: Path | str | None = None, *, dpi: int = 150,
+                        credit: str = "") -> list[Image.Image]:
+    """Render ``recipe`` as a list of A4 portrait RGB page images. ``credit`` ("Recette de Maman")
+    is printed in every page's footer."""
     lay = _Layout(dpi)
-    _render_into(lay, recipe, photo_path)
+    _render_into(lay, recipe, photo_path, credit)
     return lay.pages
 
 
@@ -399,9 +402,10 @@ def _save(pages: list[Image.Image], path: Path | str, dpi: int) -> None:
         raise
 
 
-def export_pdf(recipe: Recipe, path: Path | str, photo_path: Path | str | None = None, *, dpi: int = 150) -> int:
+def export_pdf(recipe: Recipe, path: Path | str, photo_path: Path | str | None = None, *, dpi: int = 150,
+               credit: str = "") -> int:
     """Write ``recipe`` to a PDF at ``path``. Returns the page count."""
-    pages = render_recipe_pages(recipe, photo_path, dpi=dpi)
+    pages = render_recipe_pages(recipe, photo_path, dpi=dpi, credit=credit)
     _save(pages, path, dpi)
     return len(pages)
 

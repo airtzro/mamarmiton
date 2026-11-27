@@ -209,7 +209,7 @@ def test_pasted_text_uses_the_rules(client, auth):
     assert body["dish_photo"] is None
     assert body["warnings"] == []  # clear sections: copied as written, the editor's own notice is enough
     recipe = body["recipe"]
-    assert set(recipe) == {"nom", "temps", "temps_cuisson", "pour", "type_plat", "type_cuisson", "ingredients",
+    assert set(recipe) == {"nom", "temps", "temps_cuisson", "pour", "pour_unite", "type_plat", "type_cuisson", "ingredients",
                            "etapes", "notes", "tags", "source"}
     assert recipe["nom"] == "Tarte aux pommes"
     assert recipe["pour"] == 6 and recipe["temps"] == 20 and recipe["temps_cuisson"] == 35

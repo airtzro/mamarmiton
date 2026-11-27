@@ -53,3 +53,11 @@ def test_tags_filter_needs_all_and_ignores_accents():
         assert tag_counts(RECIPES) == [("rapide", 2), ("Noël", 1)]
     finally:
         a.tags, b.tags = [], []
+
+
+def test_text_finds_the_source():
+    mamie = Recipe(nom="Tarte", source="Mamie Jeanne")
+    site = Recipe(nom="Soupe", source="https://www.marmiton.org/soupe")
+    other = Recipe(nom="Gratin")
+    assert search([mamie, site, other], Filters(text="jeanne")) == [mamie]
+    assert search([mamie, site, other], Filters(text="marmiton")) == [site]

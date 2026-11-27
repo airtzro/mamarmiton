@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import customtkinter as ctk
 
-from mamarmiton.models import Recipe
+from mamarmiton.models import Recipe, servings_text
 from mamarmiton.quantities import scale_quantity
 from mamarmiton.timers import find_durations, format_short
 from mamarmiton.ui import art, theme
@@ -149,7 +149,7 @@ class KitchenView(ctk.CTkFrame):
         self.panel.grid_propagate(False)
         self.panel.pack_propagate(False)
         theme.heading(self.panel, "Ingrédients", size=22).pack(anchor="w", padx=18, pady=(18, 4))
-        sub = ctk.CTkLabel(self.panel, text=f"pour {self.servings} personne{'s' if self.servings > 1 else ''}",
+        sub = ctk.CTkLabel(self.panel, text=f"pour {servings_text(self.servings, self.recipe.pour_unite)}",
                            font=theme.font(13), text_color=theme.MUTED, anchor="w")
         sub.pack(anchor="w", padx=18)
         scroll = ScrollFrame(self.panel)

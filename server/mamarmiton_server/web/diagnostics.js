@@ -46,9 +46,11 @@ export function install(win = window) {
   };
 }
 
-export function buildReport(message, attachLog = true, win = window) {
+export function buildReport(message, attachLog = true, win = window, { category = "bug", categoryOther = "" } = {}) {
   return {
     message: String(message).trim().slice(0, 4000),
+    category,
+    category_other: category === "other" ? String(categoryOther).trim().slice(0, 80) : "",
     client: "web",
     app_version: "web/1",
     os: String((win.navigator && win.navigator.userAgent) || "").slice(0, 300),

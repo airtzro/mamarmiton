@@ -1,6 +1,7 @@
 // The shopping list ("Courses"): the logic is in shopping.js (port of shopping.py); this file
 // keeps the list in localStorage (one list per user, removed at sign-out like the offline
 // copy of the recipes) and draws the view.
+import { servingsText } from "./quantities.js";
 import { h, icon, clear } from "./dom.js";
 import { getRecipe, state } from "./state.js";
 import { confirmDialog, toast } from "./ui.js";
@@ -103,10 +104,10 @@ export function renderCourses(main) {
     const set = (n) => { addRecipe(list, entry.id, n); saveShopping(); draw(); };
     return h("li", { class: "list-row courses-recipe" },
       h("a", { class: "grow", href: `#/r/${entry.id}`, text: recipe ? recipe.nom : "Recette indisponible" }),
-      h("div", { class: "stepper small", role: "group", "aria-label": `Personnes pour ${recipe ? recipe.nom : "cette recette"}` },
-        h("button", { class: "btn btn-icon btn-secondary", type: "button", "aria-label": "Une personne de moins", disabled: entry.servings <= 1, onClick: () => set(entry.servings - 1) }, icon("minus")),
-        h("output", { class: "stepper-value", text: `${entry.servings} pers.` }),
-        h("button", { class: "btn btn-icon btn-secondary", type: "button", "aria-label": "Une personne de plus", disabled: entry.servings >= 99, onClick: () => set(entry.servings + 1) }, icon("plus"))),
+      h("div", { class: "stepper small", role: "group", "aria-label": `Quantité pour ${recipe ? recipe.nom : "cette recette"}` },
+        h("button", { class: "btn btn-icon btn-secondary", type: "button", "aria-label": "Moins", disabled: entry.servings <= 1, onClick: () => set(entry.servings - 1) }, icon("minus")),
+        h("output", { class: "stepper-value", text: servingsText(entry.servings, recipe?.pour_unite, true) }),
+        h("button", { class: "btn btn-icon btn-secondary", type: "button", "aria-label": "Plus", disabled: entry.servings >= 99, onClick: () => set(entry.servings + 1) }, icon("plus"))),
       h("button", { class: "btn btn-icon btn-ghost", type: "button", "aria-label": `Retirer ${recipe ? recipe.nom : "la recette"} de la liste`,
         onClick: () => { removeRecipe(list, entry.id); saveShopping(); draw(); } }, icon("close")));
   }

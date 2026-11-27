@@ -164,3 +164,14 @@ export function splitAmountUnit(quantity) {
 export function joinAmountUnit(amount, unit) {
   return [amount.trim(), unit.trim()].filter(Boolean).join(" ");
 }
+
+/** "6 personnes" / "6 pers." / "6 crêpes" / "1 crêpe": what a recipe's "pour" counts (same rule as the desktop). */
+export function servingsText(n, unite = "", short = false) {
+  const unit = (unite || "").trim().split(/\s+/).filter(Boolean);
+  if (!unit.length) return short ? `${n} pers.` : `${n} personne${n > 1 ? "s" : ""}`;
+  let head = unit[0];
+  const last = head.slice(-1).toLowerCase();
+  if (n > 1 && !"sxz".includes(last)) head += "s";
+  else if (n <= 1 && head.length > 2 && "sx".includes(last) && !head.toLowerCase().endsWith("ss")) head = head.slice(0, -1);
+  return [n, head, ...unit.slice(1)].join(" ");
+}

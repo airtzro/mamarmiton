@@ -1,3 +1,4 @@
+import { servingsText } from "./quantities.js";
 import { h, icon, clear, append } from "./dom.js";
 import { allRecipes, canEdit, displayName, photos, setFavorite, state } from "./state.js";
 import { DISH_TYPES, SORTS, formatMinutes, search, tagCounts, totalTime } from "./search.js";
@@ -8,9 +9,9 @@ import { openShareDialog } from "./share.js";
 import { ALL, MINE, bookOptions, inBook, loadBook, saveBook, validBook } from "./books.js";
 
 const CATEGORIES = [
-  ["", "Toutes"], ["favoris", "Favoris"], ["Entrée", "Entrée"], ["Plat", "Plat"], ["Dessert", "Dessert"], ["Pain", "Pain"],
+  ["", "Toutes"], ["favoris", "Favoris"], ["Entrée", "Entrée"], ["Plat", "Plat"], ["Accompagnement", "Accompagnement"], ["Dessert", "Dessert"], ["Pain", "Pain"],
 ];
-const DISH_CLASS = { "Entrée": "dish-entree", Plat: "dish-plat", Dessert: "dish-dessert", Pain: "dish-pain" };
+const DISH_CLASS = { "Entrée": "dish-entree", Plat: "dish-plat", Accompagnement: "dish-accompagnement", Dessert: "dish-dessert", Pain: "dish-pain" };
 export const dishClass = (type) => DISH_CLASS[type] || "dish-other";
 
 function greeting() {
@@ -75,7 +76,7 @@ function recipeCard(recipe, refresh) {
       h("p", { class: "meta" },
         h("span", { class: "meta-item rc-dish" }, h("span", { class: "dish-dot", "aria-hidden": "true" }), recipe.type_plat),
         time ? h("span", { class: "meta-item" }, icon("clock", 16), formatMinutes(time)) : null,
-        h("span", { class: "meta-item" }, icon("users", 16), `${recipe.pour} pers.`)),
+        h("span", { class: "meta-item" }, icon("users", 16), servingsText(recipe.pour, recipe.pour_unite, true))),
       recipe.access !== "owner"
         ? h("p", { class: "owner" }, `De ${displayName(recipe.owner)}`, recipe.access === "read" ? ", en lecture seule" : ", modifiable")
         : null),

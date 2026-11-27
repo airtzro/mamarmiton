@@ -34,8 +34,10 @@ from mamarmiton.storage import RecipeStore, Trashed, _atomic_write_json, copy_as
 log = logging.getLogger(__name__)
 
 READ_ONLY_MSG = "Cette recette est en lecture seule : vous ne pouvez pas la modifier."
+NO_VARIANT_MSG = "La personne qui vous a partagé cette recette ne permet pas d'en faire des variantes."
 NOT_OWNER_MSG = ("Seul le propriétaire peut supprimer cette recette. "
-                 "Vous pouvez arrêter de voir ce carnet à la place.")
+                 "Vous pouvez la retirer de vos recettes à la place.")
+OWN_RECIPE_MSG = "C'est votre recette : supprimez-la plutôt."
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}
 
 
@@ -152,6 +154,9 @@ class RemoteStore:
         if not isinstance(outbox, list):  # old cache, or cache.json unreadable: use the copy
             outbox = self._read_json(self._outbox_path, [])
         self._outbox = [op for op in outbox if isinstance(op, dict) and "op" in op]
+        # a cache from before recipe credits: fetch everything once to learn them
+        if any(m.get("version") is not None and "credit" not in m for m in self._meta.values()):
+            self._full_pull = True
 
     def _save(self) -> None:
         with self._lock:
@@ -202,6 +207,18 @@ class RemoteStore:
     def can_edit(self, recipe_id: str) -> bool:
         return self.access(recipe_id) in ("owner", "edit")
 
+    def can_copy(self, recipe_id: str) -> bool:
+        """May I make a variant of it? (Mine or editable: always; read-only: if the share allows it.)"""
+        with self._lock:
+            meta = self._meta.get(recipe_id, {})
+            return meta.get("access", "owner") in ("owner", "edit") or bool(meta.get("can_copy", True))
+
+    def credit(self, recipe_id: str) -> dict:
+        """``{author, author_name, variant_of, variant_of_nom}`` from the server ({} if not known yet).
+        ``author`` None with a name: the author's account no longer exists."""
+        with self._lock:
+            return dict(self._meta.get(recipe_id, {}).get("credit") or {})
+
     def can_delete(self, recipe_id: str) -> bool:
         return self.access(recipe_id) == "owner"
 
@@ -249,10 +266,26 @@ class RemoteStore:
             self._save()
 
     def duplicate(self, recipe_id: str) -> Recipe | None:
-        """Copy a recipe (mine or shared with me) as a new recipe of mine in this book."""
+        """Copy a recipe (mine or shared with me) as a new recipe of mine in this book.
+
+        The copy keeps the credit of the original's author: the server records it when the copy is
+        sent, and it shows here straight away. ``PermissionError`` if the share does not allow variants.
+        """
         with self._lock:
             recipe = self._recipes.get(recipe_id)
-            return copy_as_variant(self, recipe) if recipe else None
+            if recipe is None:
+                return None
+            if not self.can_copy(recipe_id):
+                raise PermissionError(NO_VARIANT_MSG)
+            source = self.credit(recipe_id)
+            copy = copy_as_variant(self, recipe)
+            meta = self._meta[copy.id]
+            meta["variant_of"] = recipe_id
+            meta["credit"] = {"author": source.get("author", self.owner(recipe_id)),
+                              "author_name": source.get("author_name", ""),
+                              "variant_of": recipe_id, "variant_of_nom": recipe.nom}
+            self._save()
+            return copy
 
     def delete(self, recipe_id: str, keep_files: bool = False) -> Trashed | None:
         """Delete a recipe you own (``PermissionError`` otherwise).
@@ -278,6 +311,45 @@ class RemoteStore:
             self._save()
             return trashed
 
+    def can_hide(self, recipe_id: str) -> bool:
+        """A recipe someone shared with me (and that the server knows) can be taken off my list."""
+        with self._lock:
+            meta = self._meta.get(recipe_id)
+            return bool(meta) and meta.get("access", "owner") != "owner" and meta.get("version") is not None
+
+    def hide(self, recipe_id: str) -> Trashed | None:
+        """Take a recipe someone shared with me off my list; the owner keeps it. Undo with ``restore``.
+
+        Its photos stay on disk until ``purge``, like ``delete(keep_files=True)``.
+        """
+        with self._lock:
+            if recipe_id not in self._recipes:
+                return None
+            if not self.can_hide(recipe_id):
+                raise PermissionError(OWN_RECIPE_MSG)
+            dropped = [dict(o) for o in self._outbox if o.get("id") == recipe_id]
+            self._drop_ops(recipe_id)
+            trashed = Trashed(self._recipes.pop(recipe_id), meta=self._meta.pop(recipe_id), ops=dropped,
+                              conflicts=[c for c in self._conflicts if c.recipe_id == recipe_id], hidden=True)
+            self._conflicts = [c for c in self._conflicts if c.recipe_id != recipe_id]
+            self._push_op({"op": "hide", "id": recipe_id})
+            self._save()
+            return trashed
+
+    def _restore_hidden(self, trashed: Trashed) -> Recipe:
+        recipe, rid = trashed.recipe, trashed.recipe.id
+        cancelled = self._find_op("hide", rid)
+        if cancelled:
+            self._outbox.remove(cancelled)
+        else:  # already sent: ask for it back (and before the edits that were waiting)
+            self._push_op({"op": "unhide", "id": rid})
+        self._recipes[rid] = recipe
+        self._meta[rid] = dict(trashed.meta or {"images": {}, "fav": False})
+        self._conflicts.extend(trashed.conflicts)
+        self._outbox.extend(dict(o) for o in trashed.ops)
+        self._save()
+        return recipe
+
     def restore(self, trashed: Trashed) -> Recipe:
         """Undo ``delete(keep_files=True)``.
 
@@ -289,6 +361,8 @@ class RemoteStore:
         with self._lock:
             if rid in self._recipes:
                 return self._recipes[rid]
+            if trashed.hidden:
+                return self._restore_hidden(trashed)
             cancelled = None
             if trashed.server_delete_pending:
                 cancelled = self._find_op("delete", rid)
@@ -542,6 +616,13 @@ class RemoteStore:
             elif kind == "fav":
                 self.client.set_favorite(rid, op["value"])
                 self._finish(op)
+            elif kind in ("hide", "unhide"):
+                try:
+                    self.client.set_hidden(rid, kind == "hide")
+                except ApiError as exc:
+                    if exc.status != 404:  # no longer shared with me: nothing left to hide or bring back
+                        raise
+                self._finish(op)
             elif kind == "img_add":
                 return self._run_img_add(op, result)
             elif kind == "img_del":
@@ -576,8 +657,9 @@ class RemoteStore:
                 self._save()
                 return False
             data = recipe.to_dict()
+            variant_of = self._meta.get(rid, {}).get("variant_of") if op["base"] is None else None
         try:
-            out = self.client.put_recipe(rid, data, op["base"])
+            out = self.client.put_recipe(rid, data, op["base"], variant_of=variant_of)
         except ConflictError as exc:
             if exc.current:
                 self._conflict(op, exc.current, result)
@@ -600,7 +682,9 @@ class RemoteStore:
             live = next((o for o in self._outbox if o["uid"] == op["uid"]), None)
             meta = self._meta.get(rid)
             if meta is not None:
-                meta.update(version=out["version"], access=out["access"], owner=out["owner"])
+                meta.update(version=out["version"], access=out["access"], owner=out["owner"],
+                            can_copy=out.get("can_copy", True), credit=out.get("credit"))
+                meta.pop("variant_of", None)  # recorded by the server now
             if live is not None:
                 if live["rev"] == op["rev"]:
                     self._outbox.remove(live)
@@ -768,8 +852,10 @@ class RemoteStore:
                     result.pulled += 1
                     result.changed = True
             visible = set(data["visible_ids"])
+            # keep only my own never-sent recipes; someone else's recipe that is no longer visible goes
             for rid in [r for r in self._recipes if r not in visible
-                        and self._meta[r].get("version") is not None]:
+                        and (self._meta[r].get("version") is not None
+                             or self._meta[r].get("owner", self.username) != self.username)]:
                 self._drop_local(rid)
                 result.removed += 1
                 result.changed = True
@@ -795,7 +881,7 @@ class RemoteStore:
     def _apply_item(self, item: dict, force: bool = False) -> bool:
         """Put one server recipe into the cache. Returns True if something was applied."""
         rid = item["id"]
-        if any(o["op"] == "delete" and o["id"] == rid for o in self._outbox):
+        if any(o["op"] in ("delete", "hide") and o["id"] == rid for o in self._outbox):
             return False
         if item["deleted"]:
             if rid in self._recipes:
@@ -805,7 +891,9 @@ class RemoteStore:
         meta = self._meta.get(rid)
         if meta is not None and not force and self._find_op("put", rid):
             # unsent local edits: keep them, learn only the new access rights
-            meta.update(access=item["access"], owner=item["owner"])
+            meta.update(access=item["access"], owner=item["owner"], can_copy=item.get("can_copy", True))
+            if item.get("credit") is not None or "credit" not in meta:
+                meta["credit"] = item.get("credit")
             return False
         data = dict(item["recipe"])
         data["id"] = rid
@@ -813,7 +901,7 @@ class RemoteStore:
         if meta is None:
             meta = self._meta[rid] = {"images": {}, "fav": False}
         meta.update(version=item["version"], access=item["access"], owner=item["owner"],
-                    server_images=item["images"])
+                    server_images=item["images"], can_copy=item.get("can_copy", True), credit=item.get("credit"))
         recipe.favori = bool(meta.get("fav"))
         old = self._recipes.get(rid)
         self._merge_images(rid, recipe, meta, item["images"], old)

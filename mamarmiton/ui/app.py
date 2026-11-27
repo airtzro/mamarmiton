@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 
 FAVORITES = "__favoris__"
 SHOPPING = "__courses__"
-PLURALS = {"Entrée": "Entrées", "Plat": "Plats", "Dessert": "Desserts", "Pain": "Pains"}
+PLURALS = {"Entrée": "Entrées", "Plat": "Plats", "Accompagnement": "Accompagnements", "Dessert": "Desserts", "Pain": "Pains"}
 
 
 class Sidebar(ctk.CTkFrame):
@@ -468,6 +468,9 @@ class App(ctk.CTk):
         if not self.can_leave_editor():
             return
         recipes = self.store.all()
+        # a tag that no longer exists (recipe deleted, share revoked) cannot stay selected
+        known = {fold(tag) for tag, _n in tag_counts(recipes)}
+        self.home.tags = [t for t in self.home.tags if fold(t) in known]
         f = self.filters()
         results = search(recipes, f, self.home.sort())
         self.sidebar.update_counts(recipes)
@@ -601,12 +604,27 @@ class App(ctk.CTk):
     def can_delete(self, recipe: Recipe | None) -> bool:
         return recipe is None or rl.can_delete(self.store, recipe.id)
 
+    def can_hide(self, recipe: Recipe) -> bool:
+        return rl.can_hide(self.store, recipe.id)
+
     def is_owner(self, recipe: Recipe) -> bool:
         return rl.is_owner(self.store, recipe.id)
 
     def owner_name(self, recipe: Recipe) -> str:
         """Display name of the recipe's owner ("" in local mode)."""
         return rl.person_name(self.people, rl.owner_of(self.store, recipe.id)) if self.is_remote else ""
+
+    def can_copy(self, recipe: Recipe) -> bool:
+        """May I make a variant of it? (A read-only share may forbid it.)"""
+        return rl.can_copy(self.store, recipe.id)
+
+    def credit(self, recipe: Recipe, printed: bool = False) -> str:
+        """The author credit shown on the recipe ("" for my own originals on screen, and in local mode).
+        ``printed``: a printout always names the author, me included."""
+        if not self.is_remote:
+            return ""
+        me = None if printed else getattr(self.store, "username", None)
+        return rl.credit_line(self.store, recipe.id, recipe.nom, self.people, me)
 
     def sharer(self, recipe: Recipe) -> str:
         """Who shared this recipe with me ("" when it is mine)."""
@@ -657,7 +675,10 @@ class App(ctk.CTk):
             return
         if not self.can_leave_editor():
             return
-        copy = self.store.duplicate(recipe.id)
+        try:
+            copy = self.store.duplicate(recipe.id)
+        except PermissionError as exc:
+            return self._denied(exc)
         if copy is None:
             return
         usage.hit("variant_create")
@@ -675,6 +696,24 @@ class App(ctk.CTk):
         if trashed is None:
             return
         usage.hit("recipe_delete")
+        self._offer_undo(trashed, "Recette supprimée")
+
+    def hide_recipe(self, recipe: Recipe | None) -> None:
+        """Take a recipe someone shared with me off my list (theirs stays). Undo from the toast."""
+        if recipe is None:
+            return
+        self.finish_pending_delete()
+        try:
+            trashed = self.store.hide(recipe.id)
+        except PermissionError as exc:
+            return self._denied(exc)
+        if trashed is None:
+            return
+        usage.hit("recipe_hide")
+        self._offer_undo(trashed, "Recette retirée de vos recettes")
+
+    def _offer_undo(self, trashed, message: str) -> None:
+        """After a delete or hide: back to the list, with an "Annuler" toast for a few seconds."""
         self._mutated()
         self.go_home()
         store = self.store
@@ -696,7 +735,7 @@ class App(ctk.CTk):
                 self.shopping.remove_recipe(trashed.recipe.id)
                 self.save_shopping()
 
-        self._toast = Toast(self, "Recette supprimée", "Annuler", undo, expire, seconds=10)
+        self._toast = Toast(self, message, "Annuler", undo, expire, seconds=10)
 
     def finish_pending_delete(self) -> None:
         """Make a delete that can still be undone final (new delete, quit, book switch)."""
@@ -754,7 +793,8 @@ class App(ctk.CTk):
             return
         try:
             photos = self.store.image_paths(recipe)
-            export.export_pdf(recipe, Path(path), photos[0] if photos else None)
+            export.export_pdf(recipe, Path(path), photos[0] if photos else None,
+                              credit=self.credit(recipe, printed=True))
         except Exception as exc:
             log.exception("export PDF")
             messagebox.showerror("Impression impossible",
@@ -1058,12 +1098,15 @@ class App(ctk.CTk):
             self._fetching_people = False
             known = len(self.people)
             self.people.update({u["username"]: u.get("display_name") or u["username"] for u in users})
+            # names the server did not list: use the username rather than asking again on every sync
+            self.people.update({u: u for u in rl.recipe_authors(self.store) if u not in self.people})
             if len(self.people) != known and self.current is self.home:
                 self._refresh_after_sync()
 
         def failed(_exc) -> None:
             self._fetching_people = False
-            self.people.update({u: u for u in {self.store.owner(r.id) for r in self.store.all()} if u not in self.people})
+            names = {self.store.owner(r.id) for r in self.store.all()} | rl.recipe_authors(self.store)
+            self.people.update({u: u for u in names if u not in self.people})
 
         rl.run_in_thread(self, client.users, done, failed)
 

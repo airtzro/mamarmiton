@@ -330,7 +330,8 @@ class HelpDialog(Modal):
             self.close()
             app.show_update(info, force=True)
 
-        def failed(_exc) -> None:
+        def failed(exc) -> None:
+            log.warning("Update check failed: %r", exc)
             self.update_button.configure(state="normal")
             self.update_status.configure(text="Impossible de vérifier pour l'instant. Vérifiez la connexion à "
                                          "internet.", text_color=theme.DANGER)
@@ -341,24 +342,39 @@ class HelpDialog(Modal):
 class ReportDialog(Modal):
     """"Signaler un problème": a message, optionally the end of the log. Offline, it is kept and sent later."""
 
+    # (label shown, category sent): "Autre chose" asks what it is.
+    KINDS = [("Un problème", "bug"), ("Une idée", "idea"), ("Autre chose", "other")]
+
     def __init__(self, master, app: "App"):
-        super().__init__(master, "Signaler un problème", 560, 520)
+        super().__init__(master, "Signaler un problème", 560, 600)
         self.app = app
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        self.header("Signaler un problème", "Décrivez ce qui s'est passé, avec vos mots.")
+        self.header("Signaler un problème", "Dites-le avec vos mots.")
         form = ctk.CTkFrame(self, fg_color="transparent")
         form.grid(row=1, column=0, sticky="nsew", padx=32)
         form.grid_columnconfigure(0, weight=1)
-        form.grid_rowconfigure(0, weight=1)
+        form.grid_rowconfigure(2, weight=1)
+        self.kind = Choice(form, [label for label, _ in self.KINDS], command=self._kind_changed)
+        self.kind.set(self.KINDS[0][0])
+        self.kind.grid(row=0, column=0, sticky="w", pady=(0, 12))
+        # "Autre chose": the person says what it is (a visible label, the placeholder vanishes on focus)
+        self.other_box = ctk.CTkFrame(form, fg_color="transparent")
+        self.other_box.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        self.other_box.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(self.other_box, text="De quoi s'agit-il ?", font=theme.font(14, "bold"), text_color=theme.TEXT,
+                     anchor="w").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        self.other = theme.entry(self.other_box, placeholder_text="Une question, un merci…")
+        self.other.grid(row=1, column=0, sticky="ew")
+        self.other_box.grid_remove()
         self.text = theme.textbox(form, height=200)
-        self.text.grid(row=0, column=0, sticky="nsew")
+        self.text.grid(row=2, column=0, sticky="nsew")
         self.attach = ctk.BooleanVar(value=True)
-        theme.switch(form, text="Joindre le journal de l'application (aide à comprendre)", variable=self.attach,
-                     font=theme.font(13)).grid(row=1, column=0, sticky="w", pady=(12, 0))
+        theme.switch(form, text="Joindre le journal (aide à comprendre)", variable=self.attach,
+                     font=theme.font(13)).grid(row=3, column=0, sticky="w", pady=(12, 0))
         self.msg = ctk.CTkLabel(form, text="", font=theme.font(13), text_color=theme.MUTED, anchor="w",
                                 justify="left", wraplength=480)
-        self.msg.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.msg.grid(row=4, column=0, sticky="w", pady=(8, 0))
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.grid(row=2, column=0, sticky="ew", padx=28, pady=(6, 18))
         self.send_btn = theme.primary_button(footer, text="Envoyer", width=130, command=self._send)
@@ -366,8 +382,25 @@ class ReportDialog(Modal):
         theme.secondary_button(footer, text="Annuler", width=0, command=self.close).pack(side="right", padx=(0, 8))
         self.after(200, self.text.focus_set)
 
+    def category(self) -> str:
+        return dict(self.KINDS).get(self.kind.get(), "bug")
+
+    def _kind_changed(self, _label: str) -> None:
+        if self.category() == "other":
+            self.other_box.grid()
+            self.after(50, self.other.focus_set)
+        else:
+            self.other_box.grid_remove()
+        self.msg.configure(text="")
+
     def _send(self) -> None:
         message = self.text.get("1.0", "end").strip()
+        category = self.category()
+        other = self.other.get().strip() if category == "other" else ""
+        if category == "other" and not other:
+            self.msg.configure(text="Dites en quelques mots de quoi il s'agit.")
+            self.other.focus_set()
+            return
         if not message:
             self.msg.configure(text="Écrivez quelques mots avant d'envoyer.")
             return
@@ -376,7 +409,7 @@ class ReportDialog(Modal):
         client = getattr(self.app.store, "client", None) if self.app.is_remote else None
 
         def work() -> bool:
-            return report.submit(client, report.build(message, attach))
+            return report.submit(client, report.build(message, attach, category, other))
 
         def done(sent: bool) -> None:
             if sent:

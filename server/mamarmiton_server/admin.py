@@ -18,7 +18,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -48,6 +48,11 @@ class AccountChange(BaseModel):
     display_name: str | None = Field(default=None, max_length=60)
     is_admin: bool | None = None
     admin_password: str = Field(default="", max_length=security.MAX_PASSWORD)
+
+
+class ReportCategory(BaseModel):
+    category: Literal["bug", "idea", "other"]
+    category_other: str = Field(default="", max_length=80)
 
 
 class ReadFlag(BaseModel):
@@ -374,12 +379,41 @@ def register(app: FastAPI, settings: Settings, limiter: security.LoginLimiter,
 
     # ----------------------------------------------------------- reports
     @app.get(f"{PREFIX}/reports")
-    def reports(admin: Admin, conn: Conn, status: Annotated[str, Query(pattern="^(unread|all)$")] = "all") -> list[dict]:
-        where = "WHERE r.read_at IS NULL" if status == "unread" else ""
+    def reports(admin: Admin, conn: Conn, status: Annotated[str, Query(pattern="^(unread|all)$")] = "all",
+                category: Annotated[str, Query(pattern="^(all|bug|idea|other)$")] = "all") -> list[dict]:
+        clauses, params = [], []
+        if status == "unread":
+            clauses.append("r.read_at IS NULL")
+        if category != "all":
+            clauses.append("r.category = ?")
+            params.append(category)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = conn.execute("SELECT r.*, u.username, u.display_name FROM reports r JOIN users u ON u.id = r.user_id "
-                            f"{where} ORDER BY r.id DESC LIMIT 500").fetchall()
-        return [{k: r[k] for k in ("id", "created_at", "message", "client", "app_version", "os", "log_tail",
-                                   "read_at", "username", "display_name")} for r in rows]
+                            f"{where} ORDER BY r.id DESC LIMIT 500", params).fetchall()
+        return [{k: r[k] for k in ("id", "created_at", "message", "category", "category_other", "client",
+                                   "app_version", "os", "log_tail", "read_at", "username", "display_name")}
+                for r in rows]
+
+    @app.get(f"{PREFIX}/reports/counts")
+    def report_counts(admin: Admin, conn: Conn, status: Annotated[str, Query(pattern="^(unread|all)$")] = "all") -> dict:
+        """How many messages per label, for the filter chips."""
+        where = "WHERE read_at IS NULL" if status == "unread" else ""
+        counts = {"bug": 0, "idea": 0, "other": 0}
+        for row in conn.execute(f"SELECT category, COUNT(*) AS n FROM reports {where} GROUP BY category"):
+            counts[row["category"]] = row["n"]
+        return counts
+
+    @app.post(f"{PREFIX}/reports/{{rid}}/category", status_code=204)
+    def set_report_category(rid: int, body: ReportCategory, admin: Admin, conn: Conn) -> Response:
+        """The admin moves a message to another label (people do not always pick the right one)."""
+        other = " ".join(body.category_other.split()) if body.category == "other" else ""
+        if body.category == "other" and not other:
+            raise _error(422, "Dites en quelques mots de quoi il s'agit.")
+        cur = conn.execute("UPDATE reports SET category = ?, category_other = ? WHERE id = ?",
+                           (body.category, other, rid))
+        if not cur.rowcount:
+            raise _error(404, "Message introuvable.")
+        return Response(status_code=204)
 
     @app.post(f"{PREFIX}/reports/{{rid}}/read", status_code=204)
     def mark_report(rid: int, body: ReadFlag, admin: Admin, conn: Conn) -> Response:

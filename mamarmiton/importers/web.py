@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable
 
+from mamarmiton import tls
 from mamarmiton.importers.pipeline import ImportResult
 from mamarmiton.models import (COOKING_TYPES, DEFAULT_COOKING, DEFAULT_DISH, DISH_TYPES, Ingredient, Recipe,
                                fold, parse_int)
@@ -64,7 +65,7 @@ def _open(url: str, accept: str, limit: int) -> tuple[bytes, str]:
     request = urllib.request.Request(url, headers={
         "User-Agent": USER_AGENT, "Accept": accept, "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.5"})
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        with urllib.request.urlopen(request, timeout=TIMEOUT, context=tls.context()) as response:
             data = _read_limited(response, limit)
             return data, response.headers.get_content_charset() or ""
     except WebImportError:
@@ -268,6 +269,7 @@ def guess_dish_type(category: str, name: str = "") -> str:
         return DEFAULT_DISH
     for keyword, dish in (("dessert", "Dessert"), ("gateau", "Dessert"), ("sucre", "Dessert"),
                           ("entree", "Entrée"), ("apero", "Entrée"), ("starter", "Entrée"),
+                          ("accompagnement", "Accompagnement"), ("garniture", "Accompagnement"),
                           ("pain", "Pain"), ("brioche", "Pain"), ("viennoiserie", "Pain"),
                           ("plat", "Plat"), ("main", "Plat")):
         if keyword in text:

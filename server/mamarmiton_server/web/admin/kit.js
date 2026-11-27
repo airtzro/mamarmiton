@@ -21,7 +21,11 @@ export const adminApi = {
   createInvite: (note) => json(request("POST", "/invites", { json: { note } })),
   revokeInvite: (id) => request("DELETE", `${A}/invites/${u(id)}`),
   cleanupInvites: () => json(request("POST", `${A}/invites/cleanup`)),
-  reports: (status) => json(request("GET", `${A}/reports?status=${status === "unread" ? "unread" : "all"}`)),
+  reports: (status, category = "all") => json(request("GET",
+    `${A}/reports?status=${status === "unread" ? "unread" : "all"}&category=${encodeURIComponent(category)}`)),
+  reportCounts: (status) => json(request("GET", `${A}/reports/counts?status=${status === "unread" ? "unread" : "all"}`)),
+  setReportCategory: (id, category, category_other = "") =>
+    request("POST", `${A}/reports/${Number(id)}/category`, { json: { category, category_other } }),
   markReport: (id, read) => request("POST", `${A}/reports/${Number(id)}/read`, { json: { read } }),
   markAllReports: () => json(request("POST", `${A}/reports/read-all`)),
   deleteReport: (id) => request("DELETE", `${A}/reports/${Number(id)}`),

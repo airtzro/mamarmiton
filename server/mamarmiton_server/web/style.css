@@ -222,6 +222,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 /* covers */
 .dish-entree { --from: #C9D9B8; --to: #7FA273; }
 .dish-plat { --from: #F1C29F; --to: #C8553D; }
+.dish-accompagnement { --from: #C2D8D6; --to: #4F8A8B; }
 .dish-dessert { --from: #F0C6CF; --to: #B05C74; }
 .dish-pain { --from: #EED9AE; --to: #C29350; }
 .dish-other { --from: #E4D5C3; --to: #A88E76; }
@@ -266,6 +267,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .hero-info { display: flex; flex-direction: column; gap: 18px; justify-content: center; min-width: 0; }
 .hero-info h1 { font-size: clamp(2.1rem, 5.5vw, 3.3rem); line-height: 1.06; text-wrap: balance; overflow-wrap: anywhere; }
 .hero-kind { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: -8px; }
+.credit { color: var(--muted); font-style: italic; font-size: 1.05rem; margin: 0 0 2px; }
 .owner-note { display: flex; gap: 8px; align-items: center; background: var(--accent-soft); padding: 10px 14px; border-radius: 10px; font-weight: 700; }
 .facts { display: flex; flex-wrap: wrap; gap: 12px 36px; }
 .fact dt { font-size: 1rem; color: var(--muted); }
@@ -420,6 +422,7 @@ body:has(.save-bar) main { padding-bottom: 0; }
 .list-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; background: var(--surface-alt); border-radius: 12px; }
 .list-row select { width: auto; min-width: 150px; }
 .share-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
+.share-form .hint { grid-column: 1 / -1; margin: 0; }
 @media (max-width: 640px) { .share-form { grid-template-columns: 1fr; } }
 .lightbox { display: flex; flex-direction: column; gap: 12px; align-items: center; }
 .lightbox-img { max-height: 70vh; max-width: 100%; border-radius: 12px; object-fit: contain; background: var(--surface-alt); min-height: 120px; }
@@ -526,3 +529,9 @@ main { padding-bottom: 72px; }
   body { background: #fff; color: #000; }
   .card { box-shadow: none; }
 }
+
+.pour-row { display: flex; gap: 8px; }
+.pour-row input[type="number"] { width: 5.5em; flex: none; }
+.pour-row input[type="text"] { flex: 1; min-width: 0; }
+
+.source-line { overflow-wrap: anywhere; }
