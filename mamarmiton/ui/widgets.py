@@ -325,22 +325,81 @@ class ReportButton(ctk.CTkButton):
 
 
 class UpdateBanner(ctk.CTkFrame):
-    """A discreet "new version" notice at the bottom of the window with two buttons."""
+    """A discreet "new version" notice at the bottom of the window.
 
-    def __init__(self, master, message: str, on_download: Callable[[], None], on_later: Callable[[], None]):
+    It shows a message with buttons (``set_buttons``), or a progress bar with a cancel link
+    (``show_progress`` / ``set_progress``), or a plain status line (``show_status``), in place.
+    """
+
+    def __init__(self, master, message: str, on_download: Callable[[], None], on_later: Callable[[], None],
+                 download_text: str = "Télécharger", primary: bool = False, close_on_download: bool = True):
         super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER_STRONG,
                          corner_radius=theme.RADIUS)
-        ctk.CTkLabel(self, text=message, font=theme.font(14), text_color=theme.TEXT, anchor="w",
-                     justify="left", wraplength=420).pack(side="left", padx=(18, 8), pady=12)
-        self.download_button = theme.link_button(self, text="Télécharger", command=lambda: self._run(on_download))
-        self.download_button.pack(side="left", padx=(0, 4), pady=8)
-        self.later_button = theme.link_button(self, text="Plus tard", command=lambda: self._run(on_later))
-        self.later_button.pack(side="left", padx=(0, 10), pady=8)
+        self.label = ctk.CTkLabel(self, text=message, font=theme.font(14), text_color=theme.TEXT, anchor="w",
+                                  justify="left", wraplength=420)
+        self.actions = ctk.CTkFrame(self, fg_color="transparent")
+        self.progress_bar: ctk.CTkProgressBar | None = None
+        self.cancel_button: ctk.CTkButton | None = None
+        self.download_button, self.later_button = self.set_buttons(message, [
+            (download_text, on_download, "primary" if primary else "link", close_on_download),
+            ("Plus tard", on_later, "link", True),
+        ])
         self.place(relx=0.5, rely=1.0, anchor="s", y=-24)
         self.lift()
 
-    def _run(self, callback: Callable[[], None]) -> None:
-        self.destroy()
+    def _clear(self, layout: str = "row") -> None:
+        """``layout``: "row" (message then actions), "stacked" (actions under a long message), "text"."""
+        for child in self.actions.winfo_children():
+            child.destroy()
+        self.progress_bar = None
+        self.cancel_button = None
+        self.label.pack_forget()
+        self.actions.pack_forget()  # an empty frame would fall back to its default 200 px height
+        if layout == "stacked":
+            self.label.pack(side="top", anchor="w", padx=18, pady=(12, 2))
+            self.actions.pack(side="top", anchor="w", padx=(10, 10), pady=(0, 8))
+        else:
+            self.label.pack(side="left", padx=(18, 8), pady=12)
+            if layout == "row":
+                self.actions.pack(side="left", padx=(0, 10), pady=8)
+
+    def set_buttons(self, message: str, buttons, stacked: bool = False) -> list[ctk.CTkButton]:
+        """``buttons``: (text, callback, "primary" | "link", closes_the_banner) tuples."""
+        self._clear("stacked" if stacked else "row")
+        self.label.configure(text=message)
+        made = []
+        for text, callback, style, closes in buttons:
+            if style == "primary":
+                btn = theme.primary_button(self.actions, text=text, width=0, height=34)
+            else:
+                btn = theme.link_button(self.actions, text=text)
+            btn.configure(command=lambda c=callback, x=closes: self._run(c, x))
+            btn.pack(side="left", padx=(0, 4))
+            made.append(btn)
+        return made
+
+    def show_progress(self, message: str, fraction: float, on_cancel: Callable[[], None]) -> None:
+        self._clear()
+        self.label.configure(text=message)
+        self.progress_bar = ctk.CTkProgressBar(self.actions, width=160, height=8, corner_radius=4,
+                                               progress_color=theme.ACCENT, fg_color=theme.SURFACE_ALT)
+        self.progress_bar.set(fraction)
+        self.progress_bar.pack(side="left", padx=(0, 10))
+        self.cancel_button = theme.link_button(self.actions, text="Annuler", command=on_cancel)
+        self.cancel_button.pack(side="left")
+
+    def set_progress(self, message: str, fraction: float) -> None:
+        self.label.configure(text=message)
+        if self.progress_bar is not None:
+            self.progress_bar.set(fraction)
+
+    def show_status(self, message: str) -> None:
+        self._clear("text")
+        self.label.configure(text=message)
+
+    def _run(self, callback: Callable[[], None], close: bool = True) -> None:
+        if close:
+            self.destroy()
         callback()
 
 

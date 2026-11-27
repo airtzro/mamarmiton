@@ -18,7 +18,8 @@ dependencies = [
 ai = ["llama-cpp-python>=0.3"]
 # Reading scanned PDFs (also needs the Tesseract and Poppler programs)
 ocr = ["pdf2image>=1.17", "pytesseract>=0.3"]
-dev = ["pytest>=8", "pyinstaller>=6"]
+# PyInstaller 6.9+: the in-app update restarts the one-file build with PYINSTALLER_RESET_ENVIRONMENT
+dev = ["pytest>=8", "pyinstaller>=6.9"]
 
 [project.scripts]
 mamarmiton = "mamarmiton.ui.app:main"
