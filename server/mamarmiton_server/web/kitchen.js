@@ -2,7 +2,7 @@
 // Port of mamarmiton/ui/kitchen.py. Full screen overlay, swipe / arrows / buttons,
 // ingredients panel (scaled to the chosen servings), timers, and a screen wake lock.
 import { h, icon } from "./dom.js";
-import { frac, scaleQuantity } from "./quantities.js";
+import { frac, scaleQuantity, servingsText } from "./quantities.js";
 import { timerButtons } from "./timer-tray.js";
 
 let current = null;   // {close()} of the overlay on screen
@@ -65,7 +65,7 @@ export function openKitchen(recipe, { servings, start = 0, onClose } = {}) {
     : h("p", { class: "muted", text: "Aucun ingrédient." });
   const panel = h("aside", { class: "k-panel", id: "k-ingredients", hidden: true, "aria-label": "Ingrédients" },
     h("h2", { class: "serif", text: "Ingrédients" }),
-    h("p", { class: "muted", text: `pour ${people} personne${people > 1 ? "s" : ""}` }),
+    h("p", { class: "muted", text: `pour ${servingsText(people, recipe.pour_unite)}` }),
     ingList);
   ingBtn.setAttribute("aria-controls", "k-ingredients");
 

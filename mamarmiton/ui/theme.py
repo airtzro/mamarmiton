@@ -53,6 +53,7 @@ NOTE_BAR = ("#E0B24A", "#C9A04A")
 DISH_PALETTE = {
     "Entrée": {"from": "#C9D9B8", "to": "#7FA273", "dot": "#7FA273", "chip": ("#D3E2C6", "#26331F")},
     "Plat": {"from": "#F1C29F", "to": "#C8553D", "dot": "#D9704F", "chip": ("#F0CDB9", "#3D2820")},
+    "Accompagnement": {"from": "#C2D8D6", "to": "#4F8A8B", "dot": "#5E9C9C", "chip": ("#CDE1DF", "#1E3132")},
     "Dessert": {"from": "#F0C6CF", "to": "#B05C74", "dot": "#C4708A", "chip": ("#EDCBD4", "#3A2229")},
     "Pain": {"from": "#EED9AE", "to": "#C29350", "dot": "#C9A25E", "chip": ("#EAD8B3", "#382C1A")},
 }

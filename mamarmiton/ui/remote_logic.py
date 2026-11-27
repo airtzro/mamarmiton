@@ -92,6 +92,11 @@ def can_delete(store: Any, recipe_id: str) -> bool:
     return bool(getattr(store, "can_delete", lambda _id: True)(recipe_id))
 
 
+def can_hide(store: Any, recipe_id: str) -> bool:
+    """A recipe someone shared with me can be taken off my list (never in a local store)."""
+    return bool(getattr(store, "can_hide", lambda _id: False)(recipe_id))
+
+
 def is_owner(store: Any, recipe_id: str) -> bool:
     return getattr(store, "access", lambda _id: "owner")(recipe_id) == "owner"
 
@@ -114,11 +119,52 @@ def sharer_label(store: Any, recipe_id: str, people: dict[str, str]) -> str:
     return person_name(people, owner_of(store, recipe_id))
 
 
+def can_copy(store: Any, recipe_id: str) -> bool:
+    """May I make a variant of it? Always in a local store."""
+    return bool(getattr(store, "can_copy", lambda _id: True)(recipe_id))
+
+
+def credit_line(store: Any, recipe_id: str, nom: str, people: dict[str, str], me: str | None = None) -> str:
+    """Who wrote the recipe: "Recette de Maman", "Variante de « Tarte » de Maman"; "" in a local store.
+
+    ``me`` set (on screen): my own original recipes need no signature, and my own variants of my own
+    recipes say only what they come from. ``me=None`` (a printout leaves the app): always name the author.
+    """
+    if not hasattr(store, "credit"):
+        return ""
+    credit = store.credit(recipe_id)
+    if credit:
+        author = credit.get("author")
+        name = person_name(people, author) if author else credit.get("author_name") or ""
+    else:  # not known yet (older server): the owner is the best guess
+        author = owner_of(store, recipe_id)
+        name = person_name(people, author)
+    mine = me is not None and author == me
+    if credit.get("variant_of"):
+        source = (credit.get("variant_of_nom") or "").strip()
+        if mine or not name:
+            return f"Variante de « {source} »" if source else "Variante"
+        return f"Variante de « {source} » de {name}" if source else f"Variante d'une recette de {name}"
+    if mine or not name:
+        return ""
+    return f"Recette de {name}"
+
+
 def unknown_owners(store: Any, people: dict[str, str]) -> bool:
     """True when some recipe belongs to someone whose display name we do not know yet."""
     if not hasattr(store, "owner"):
         return False
-    return any(not is_owner(store, r.id) and store.owner(r.id) not in people for r in store.all())
+    if any(not is_owner(store, r.id) and store.owner(r.id) not in people for r in store.all()):
+        return True
+    return bool(recipe_authors(store) - people.keys())
+
+
+def recipe_authors(store: Any) -> set[str]:
+    """Usernames credited on recipes in the store (e.g. the author of a variant I made)."""
+    credit = getattr(store, "credit", None)
+    if credit is None:
+        return set()
+    return {a for a in (credit(r.id).get("author") for r in store.all()) if a}
 
 
 # ----------------------------------------------------------------- upload
@@ -321,9 +367,9 @@ def format_date(iso: str) -> str:
 
 def recipe_sections(recipe: Any) -> list[tuple[str, str]]:
     """The parts of a recipe a person compares: ``(title, text)``."""
-    from mamarmiton.models import format_minutes
+    from mamarmiton.models import format_minutes, servings_text
 
-    facts = [f"Pour {recipe.pour} personne{'s' if recipe.pour > 1 else ''}"]
+    facts = [f"Pour {servings_text(recipe.pour, recipe.pour_unite)}"]
     if recipe.temps:
         facts.append(f"préparation {format_minutes(recipe.temps)}")
     if recipe.temps_cuisson:

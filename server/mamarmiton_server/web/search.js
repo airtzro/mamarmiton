@@ -1,6 +1,6 @@
 // Port of mamarmiton/search.py: accent-insensitive search on name + ingredients.
 
-export const DISH_TYPES = ["Entrée", "Plat", "Dessert", "Pain"];
+export const DISH_TYPES = ["Entrée", "Plat", "Accompagnement", "Dessert", "Pain"];
 export const COOKING_TYPES = ["Four", "Poêle", "Casserole", "Vapeur", "Micro-ondes", "Sans cuisson"];
 export const SORTS = ["Favoris d'abord", "Nom (A → Z)", "Plus rapides", "Plus récentes"];
 
@@ -66,7 +66,7 @@ export function matches(recipe, filters) {
   }
   const words = fold(filters.text).split(/\s+/).filter(Boolean);
   if (words.length) {
-    const haystack = [fold(recipe.nom), ...recipe.ingredients.map((i) => fold(i.nom)), ...(recipe.tags || []).map(fold)].join(" ");
+    const haystack = [fold(recipe.nom), ...recipe.ingredients.map((i) => fold(i.nom)), ...(recipe.tags || []).map(fold), fold(recipe.source || "")].join(" ");
     if (!words.every((w) => haystack.includes(w))) return false;
   }
   return true;

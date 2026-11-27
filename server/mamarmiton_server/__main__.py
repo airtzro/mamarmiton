@@ -75,7 +75,8 @@ def reports_text(conn, show_all: bool = False) -> str:
     out = []
     for r in rows:
         flag = "" if r["read_at"] is None else "  (déjà lu)"
-        out.append(f"=== #{r['id']}  {r['created_at'][:16].replace('T', ' ')}  @{r['username']}  "
+        label = {"bug": "[bug]", "idea": "[idée]"}.get(r["category"], f"[autre : {r['category_other']}]")
+        out.append(f"=== #{r['id']} {label}  {r['created_at'][:16].replace('T', ' ')}  @{r['username']}  "
                    f"{r['client']} {r['app_version']}  {r['os']}{flag}\n{r['message']}")
         if r["log_tail"]:
             tail = r["log_tail"].splitlines()

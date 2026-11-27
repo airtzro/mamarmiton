@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import json
 import tkinter as tk
+import webbrowser
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
 import customtkinter as ctk
 
-from mamarmiton.models import Recipe, format_minutes
+from mamarmiton.models import Recipe, format_minutes, servings_text
 from mamarmiton.quantities import scale_quantity
 from mamarmiton.timers import find_durations, format_short
 from mamarmiton.ui import art, remote_logic as rl, theme
@@ -164,7 +165,8 @@ class DetailView(ctk.CTkFrame):
         store = self.app.store
         return (json.dumps(recipe.to_dict(), sort_keys=True), recipe.favori,
                 tuple(p.name for p in store.image_paths(recipe)), rl.can_edit(store, recipe.id),
-                rl.can_delete(store, recipe.id), self.app.owner_name(recipe))
+                rl.can_delete(store, recipe.id), self.app.owner_name(recipe), self.app.credit(recipe),
+                self.app.can_copy(recipe))
 
     def show(self, recipe: Recipe) -> None:
         same = self.recipe is not None and self.recipe.id == recipe.id
@@ -207,14 +209,17 @@ class DetailView(ctk.CTkFrame):
         r, app = self.recipe, self.app
         if r is None:
             return []
-        items: list = [("Imprimer / PDF", lambda: app.print_recipe(r)),
-                       ("Créer une variante", lambda: app.duplicate_recipe(r))]
+        items: list = [("Imprimer / PDF", lambda: app.print_recipe(r))]
+        if app.can_copy(r):  # a read-only share may not allow variants
+            items.append(("Créer une variante", lambda: app.duplicate_recipe(r)))
         if app.is_remote and app.is_owner(r):
             items.append(("Partager", lambda: app.share_recipe(r)))
         if app.can_edit(r):
             items.append(("Ajouter une photo", lambda: app.add_photo(r)))
         if app.can_delete(r):
             items += [None, ("Supprimer", lambda: app.delete_recipe(r))]
+        elif app.can_hide(r):
+            items += [None, ("Retirer de mes recettes", lambda: app.hide_recipe(r))]
         return items
 
     def _open_more(self) -> None:
@@ -228,7 +233,7 @@ class DetailView(ctk.CTkFrame):
                 menu.add_separator()
                 continue
             label, command = item
-            danger = label == "Supprimer"
+            danger = label in ("Supprimer", "Retirer de mes recettes")
             menu.add_command(label=f"  {label}  ", command=lambda c=command: (self._close_more(), c()),
                              foreground=pick(theme.DANGER) if danger else None)
         b = self.btn_more
@@ -317,8 +322,14 @@ class DetailView(ctk.CTkFrame):
             owner.pack(anchor="w", pady=(8, 0))
             self._wrapped.append((owner, "title"))
         if r.source:
-            ctk.CTkLabel(info, text=f"Importée depuis « {r.source} »", font=theme.font(13, slant="italic"),
-                         text_color=theme.MUTED, anchor="w").pack(anchor="w", pady=(6, 0))
+            link = r.source.startswith(("http://", "https://"))
+            source = ctk.CTkLabel(info, text=f"Source : {r.source}", font=theme.font(13, slant="italic"),
+                                  text_color=theme.ACCENT if link else theme.MUTED, anchor="w", justify="left",
+                                  cursor="hand2" if link else "")
+            source.pack(anchor="w", pady=(6, 0))
+            self._wrapped.append((source, "title"))
+            if link:
+                source.bind("<Button-1>", lambda _e, url=r.source: webbrowser.open(url))
 
         stats = ctk.CTkFrame(info, fg_color="transparent")
         stats.pack(anchor="w", fill="x", pady=(20, 0))
@@ -330,7 +341,7 @@ class DetailView(ctk.CTkFrame):
             facts.append(("Cuisson", format_minutes(r.temps_cuisson)))
         if r.temps and r.temps_cuisson:
             facts.append(("Total", format_minutes(r.temps_total)))
-        facts.append(("Pour", f"{r.pour} pers."))
+        facts.append(("Pour", servings_text(r.pour, r.pour_unite, short=True)))
         for label, value in facts:
             tile = ctk.CTkFrame(stats, fg_color="transparent")
             self.tiles.append(tile)
@@ -395,7 +406,7 @@ class DetailView(ctk.CTkFrame):
         elif listed == self.servings:
             text = "Dans la liste de courses · Voir"
         else:
-            text = f"Mettre à jour la liste ({self.servings} pers.)"
+            text = f"Mettre à jour la liste ({servings_text(self.servings, self.recipe.pour_unite, short=True)})"
         self.btn_shop.configure(text=text)
 
     def _change_servings(self, delta: int) -> None:
@@ -406,10 +417,10 @@ class DetailView(ctk.CTkFrame):
         r = self.recipe
         if r is None:
             return
-        self.lbl_servings.configure(text=f"  {self.servings} personne{'s' if self.servings > 1 else ''}")
+        self.lbl_servings.configure(text=f"  {servings_text(self.servings, r.pour_unite)}")
         self._update_shopping_button()
         if self.servings != r.pour:
-            self.lbl_reset.configure(text=f"Revenir à {r.pour} personne{'s' if r.pour > 1 else ''}")
+            self.lbl_reset.configure(text=f"Revenir à {servings_text(r.pour, r.pour_unite)}")
             self.lbl_reset.pack(after=self.lbl_servings.master, anchor="w", padx=16, pady=(4, 0))
         else:
             self.lbl_reset.pack_forget()
@@ -475,6 +486,21 @@ class DetailView(ctk.CTkFrame):
                                  justify="left", anchor="w", wraplength=420)
             label.grid(row=1, column=1, sticky="ew", padx=16, pady=(4, 18))
             self._wrapped.append((label, "note"))
+
+        # the author's credit signs the page, quietly, above the dates; nobody can edit it away
+        credit = self.app.credit(r)
+        if self.app.is_remote and not self.app.is_owner(r) and credit == f"Recette de {self.app.owner_name(r)}":
+            credit = ""  # already said under the title
+        if credit:
+            signed = ctk.CTkLabel(column, text=f"— {credit}", font=theme.font(14, slant="italic"),
+                                  text_color=theme.MUTED, anchor="w", justify="left", wraplength=420)
+            signed.grid(row=2, column=0, sticky="w", pady=(24, 0))
+            self._wrapped.append((signed, "note"))
+        dates = [f"Créée le {rl.format_date(r.cree_le)}"]
+        if r.modifie_le:
+            dates.append(f"modifiée le {rl.format_date(r.modifie_le)}")
+        ctk.CTkLabel(column, text=" · ".join(dates), font=theme.font(12), text_color=theme.FAINT,
+                     anchor="w").grid(row=3, column=0, sticky="w", pady=(4 if credit else 20, 0))
 
     def _rewrap(self, _event=None) -> None:
         if not self._built:

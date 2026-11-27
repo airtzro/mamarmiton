@@ -261,7 +261,14 @@ class EditorView(ctk.CTkFrame):
         numbers.grid_columnconfigure((0, 1, 2), weight=1, uniform="n")
         self.e_prep = self._number(numbers, 0, "Préparation", "min", "ex. 20", r.temps)
         self.e_cook = self._number(numbers, 1, "Cuisson", "min", "ex. 45", r.temps_cuisson)
-        self.e_pour = self._number(numbers, 2, "Pour", "pers.", "4", r.pour)
+        self.e_pour = self._number(numbers, 2, "Pour", "", "4", r.pour)
+        # What the number counts: empty means people; "crêpes" makes it "Pour 6 crêpes".
+        self.e_unite = theme.entry(self.e_pour.master, placeholder_text="personnes", width=110)
+        self.e_unite.grid(row=0, column=1, padx=(8, 0))
+        if r.pour_unite:
+            self.e_unite.insert(0, r.pour_unite)
+        ctk.CTkLabel(self.e_pour.master.master, text="ou crêpes, parts, verres…", font=theme.font(12),
+                     text_color=theme.FAINT, anchor="w").pack(fill="x")
 
         box = labelled(card, "Type de plat")
         box.pack(fill="x", pady=(0, 14))
@@ -330,6 +337,12 @@ class EditorView(ctk.CTkFrame):
         self.t_notes.pack(fill="x")
         self.t_notes.insert("1.0", r.notes)
 
+        card = self._section(col, "Source", "Facultatif : d'où vient la recette ? Un livre, un site, une personne…")
+        self.e_source = theme.entry(card, placeholder_text="ex. Mamie Jeanne, ou https://…")
+        self.e_source.pack(fill="x")
+        if r.source:
+            self.e_source.insert(0, r.source)
+
         theme.primary_button(col, text="Enregistrer la recette", image=art.icon("check", theme.ON_ACCENT, 17),
                              compound="left", height=48, command=self.submit).pack(anchor="e", pady=(0, 24))
         self.column = col
@@ -357,8 +370,9 @@ class EditorView(ctk.CTkFrame):
         field.grid_columnconfigure(0, weight=1)
         entry = theme.entry(field, placeholder_text=placeholder)
         entry.grid(row=0, column=0, sticky="ew")
-        ctk.CTkLabel(field, text=suffix, font=theme.font(14), text_color=theme.MUTED).grid(row=0, column=1,
-                                                                                           padx=(8, 0))
+        if suffix:
+            ctk.CTkLabel(field, text=suffix, font=theme.font(14), text_color=theme.MUTED).grid(row=0, column=1,
+                                                                                               padx=(8, 0))
         if value:
             entry.insert(0, str(value))
         return entry
@@ -451,9 +465,9 @@ class EditorView(ctk.CTkFrame):
     def _state(self) -> tuple:
         if self.recipe is None or not hasattr(self, "e_nom") or not self.e_nom.winfo_exists():
             return ()
-        return (self.e_nom.get(), self.e_prep.get(), self.e_cook.get(), self.e_pour.get(), self.m_plat.get(),
+        return (self.e_nom.get(), self.e_prep.get(), self.e_cook.get(), self.e_pour.get(), self.e_unite.get(), self.m_plat.get(),
                 self.m_cuisson.get(), self.fav.get(), tuple(self.tags), self.e_tag.get().strip(), tuple(r.state() for r in self.rows),
-                self.t_steps.get("1.0", "end").strip(), self.t_notes.get("1.0", "end").strip())
+                self.t_steps.get("1.0", "end").strip(), self.t_notes.get("1.0", "end").strip(), self.e_source.get().strip())
 
     def _fail(self, message: str, widget=None) -> None:
         self.error.configure(text=message)
@@ -479,6 +493,7 @@ class EditorView(ctk.CTkFrame):
         r.temps = parse_minutes(self.e_prep.get())
         r.temps_cuisson = parse_minutes(self.e_cook.get())
         r.pour = parse_int(self.e_pour.get(), default=4, minimum=1)
+        r.pour_unite = " ".join(self.e_unite.get().split())[:40]
         r.type_plat = self.m_plat.get() or r.type_plat
         r.type_cuisson = self.m_cuisson.get()
         r.favori = self.fav.get()
@@ -486,6 +501,7 @@ class EditorView(ctk.CTkFrame):
         r.ingredients = [i for i in (row.value() for row in self.rows) if i]
         r.etapes = [s for s in (strip_step_number(x) for x in self.t_steps.get("1.0", "end").splitlines()) if s]
         r.notes = self.t_notes.get("1.0", "end").strip()
+        r.source = " ".join(self.e_source.get().split())[:500]
         on_save = self.on_save
         self._snapshot = self._state()  # saving: leaving the editor must not ask "discard changes?"
         try:

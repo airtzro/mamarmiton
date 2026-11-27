@@ -24,7 +24,7 @@ from mamarmiton import __version__, config
 log = logging.getLogger(__name__)
 
 EVENTS = (
-    "recipe_open", "recipe_create", "recipe_edit", "recipe_delete", "delete_undo", "variant_create",
+    "recipe_open", "recipe_create", "recipe_edit", "recipe_delete", "recipe_hide", "delete_undo", "variant_create",
     "search", "favorite_toggle", "photo_add", "pdf_import", "url_import", "pdf_export",
     "kitchen_open", "timer_start", "shopping_add", "shopping_open", "shopping_copy_or_print",
     "tag_filter", "tag_add", "share_create", "sync_conflict_shown", "update_banner_click",

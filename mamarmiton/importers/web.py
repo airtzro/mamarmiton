@@ -268,6 +268,7 @@ def guess_dish_type(category: str, name: str = "") -> str:
         return DEFAULT_DISH
     for keyword, dish in (("dessert", "Dessert"), ("gateau", "Dessert"), ("sucre", "Dessert"),
                           ("entree", "Entrée"), ("apero", "Entrée"), ("starter", "Entrée"),
+                          ("accompagnement", "Accompagnement"), ("garniture", "Accompagnement"),
                           ("pain", "Pain"), ("brioche", "Pain"), ("viennoiserie", "Pain"),
                           ("plat", "Plat"), ("main", "Plat")):
         if keyword in text:

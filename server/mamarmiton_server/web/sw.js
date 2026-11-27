@@ -6,7 +6,7 @@
 // The server replaces the version below with its own, so a new release drops the old shell cache.
 // SHELL_REVISION is bumped by hand whenever the list below changes between two server releases.
 const VERSION = "__VERSION__";
-const SHELL_REVISION = 2;
+const SHELL_REVISION = 4;
 const SHELL_CACHE = `mamarmiton-shell-${VERSION}-${SHELL_REVISION}`;
 const PHOTO_CACHE = "mamarmiton-photos";
 const SLOW_NETWORK_MS = 4000;

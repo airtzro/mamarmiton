@@ -282,6 +282,49 @@ def test_reports_read_unread_delete(client, admin_headers, maman):
     assert client.get("/admin/api/reports?status=evil", headers=admin_headers).status_code == 422
 
 
+
+def test_reports_labels_filter_and_relabel(client, admin_headers, maman):
+    bug = client.post("/reports", json={"message": "ça plante"}, headers=maman).json()["id"]  # old apps: no label
+    idea = client.post("/reports", json={"message": "des menus", "category": "idea"}, headers=maman).json()["id"]
+    other = client.post("/reports", json={"message": "bravo", "category": "other", "category_other": "  un   merci "},
+                        headers=maman).json()["id"]
+    # "other" must say what it is; unknown labels are refused
+    assert client.post("/reports", json={"message": "x", "category": "other"}, headers=maman).status_code == 422
+    assert client.post("/reports", json={"message": "x", "category": "other", "category_other": "  "},
+                       headers=maman).status_code == 422
+    assert client.post("/reports", json={"message": "x", "category": "spam"}, headers=maman).status_code == 422
+    # the side text is dropped when the label is not "other"
+    client.post("/reports", json={"message": "y", "category": "idea", "category_other": "ignored"}, headers=maman)
+
+    def ids(**query):
+        q = "&".join(f"{k}={v}" for k, v in query.items())
+        return [r["id"] for r in client.get(f"/admin/api/reports?{q}", headers=admin_headers).json()]
+
+    all_rows = {r["id"]: r for r in client.get("/admin/api/reports", headers=admin_headers).json()}
+    assert all_rows[bug]["category"] == "bug" and all_rows[other]["category_other"] == "un merci"
+    assert all(r["category_other"] == "" for r in all_rows.values() if r["category"] != "other")
+    assert ids(category="bug") == [bug]
+    assert ids(category="other") == [other]
+    assert idea in ids(category="idea") and bug not in ids(category="idea")
+    assert client.get("/admin/api/reports?category=evil", headers=admin_headers).status_code == 422
+    assert client.get("/admin/api/reports/counts", headers=admin_headers).json() == {"bug": 1, "idea": 2, "other": 1}
+
+    client.post(f"/admin/api/reports/{bug}/read", json={"read": True}, headers=admin_headers)
+    assert ids(status="unread", category="bug") == []
+    assert client.get("/admin/api/reports/counts?status=unread", headers=admin_headers).json()["bug"] == 0
+
+    # the admin moves a message to another label
+    url = f"/admin/api/reports/{bug}/category"
+    assert client.post(url, json={"category": "other"}, headers=admin_headers).status_code == 422
+    assert client.post(url, json={"category": "other", "category_other": "question"}, headers=admin_headers).status_code == 204
+    assert bug in ids(category="other")
+    assert client.post(url, json={"category": "idea", "category_other": "x"}, headers=admin_headers).status_code == 204
+    row = next(r for r in client.get("/admin/api/reports", headers=admin_headers).json() if r["id"] == bug)
+    assert (row["category"], row["category_other"]) == ("idea", "")
+    assert client.post("/admin/api/reports/999/category", json={"category": "bug"}, headers=admin_headers).status_code == 404
+    assert client.post(url, json={"category": "bug"}, headers=maman).status_code in (401, 403)
+
+
 # -------------------------------------------------------------------- usage
 def test_usage_summary(client, admin_headers, maman):
     from datetime import date

@@ -16,7 +16,20 @@ from mamarmiton.ui.widgets import Choice, Modal, ScrollFrame
 if TYPE_CHECKING:
     from mamarmiton.ui.app import App
 
-READ, WRITE = "Peut seulement lire", "Peut aussi modifier"
+# what a share lets the other person do
+READ, COPY, WRITE = "Lecture seule", "Lecture + variantes", "Modification"
+LEVEL_HINTS = {
+    READ: "Elle pourra lire, sans modifier ni faire sa propre version.",
+    COPY: "Elle pourra lire et créer sa propre variante. Votre nom restera sur la variante.",
+    WRITE: "Elle pourra modifier directement, et créer des variantes.",
+}
+
+
+def level_of(share: dict) -> str:
+    """The level of a share from ``GET /shares`` (older servers send no ``can_copy``: variants were allowed)."""
+    if share.get("can_edit"):
+        return WRITE
+    return COPY if share.get("can_copy", True) else READ
 
 
 class ShareDialog(Modal):
@@ -107,9 +120,13 @@ class ShareDialog(Modal):
             self.people = ctk.CTkFrame(card, fg_color=theme.SURFACE_ALT, corner_radius=theme.RADIUS)
             self.people.pack(fill="x", padx=20, pady=(10, 0))
             self._fill_people()
-            self.mode = Choice(card, [READ, WRITE], height=38)
+            self.mode = Choice(card, [READ, COPY, WRITE], height=38, command=self._show_hint)
             self.mode.set(READ)
             self.mode.pack(anchor="w", padx=20, pady=(14, 0))
+            self.hint = ctk.CTkLabel(card, text=LEVEL_HINTS[READ], font=theme.font(13), text_color=theme.MUTED,
+                                     anchor="w", justify="left", wraplength=440)
+            self.hint.pack(anchor="w", padx=20, pady=(6, 0))
+            self._wrapped.append(self.hint)
             self.btn_share = theme.primary_button(card, text="Partager", width=0,
                                                   image=art.icon("share", theme.ON_ACCENT, 17), compound="left",
                                                   command=self._share)
@@ -133,7 +150,7 @@ class ShareDialog(Modal):
             words.grid(row=0, column=0, sticky="w", padx=6)
             ctk.CTkLabel(words, text=share.get("display_name") or share["username"], font=theme.font(14, "bold"),
                          text_color=theme.TEXT, anchor="w").pack(anchor="w")
-            ctk.CTkLabel(words, text=WRITE if share.get("can_edit") else READ, font=theme.font(12),
+            ctk.CTkLabel(words, text=level_of(share), font=theme.font(12),
                          text_color=theme.MUTED, anchor="w").pack(anchor="w")
             theme.danger_button(row, text="Retirer", width=0, height=36,
                                 command=lambda s=share: self._remove(s)).grid(row=0, column=1, padx=(8, 4))
@@ -159,6 +176,9 @@ class ShareDialog(Modal):
                 text_color=theme.TEXT, font=theme.font(14, "bold" if picked else "normal"),
                 command=lambda u=user["username"]: self._pick(u)).pack(fill="x", padx=4, pady=2)
 
+    def _show_hint(self, level: str) -> None:
+        self.hint.configure(text=LEVEL_HINTS[level])
+
     def _pick(self, username: str) -> None:
         self.selected = username
         self._fill_people()
@@ -171,15 +191,16 @@ class ShareDialog(Modal):
         if not self.selected:
             self.msg.configure(text="Choisissez d'abord une personne dans la liste.")
             return
-        username, can_edit = self.selected, self.mode.get() == WRITE
+        username, level = self.selected, self.mode.get()
+        can_edit, can_copy = level == WRITE, level in (COPY, WRITE)
         self.msg.configure(text="")
         self._busy(True)
 
         def work():
             if self.recipe is None:
-                self.client.share_book(username, can_edit)
+                self.client.share_book(username, can_edit, can_copy)
             else:
-                self.client.share_recipe(self.recipe.id, username, can_edit)
+                self.client.share_recipe(self.recipe.id, username, can_edit, can_copy)
             return self.client.shares()
 
         def done(shares):

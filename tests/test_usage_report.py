@@ -188,6 +188,14 @@ def test_build_report_fields():
     assert payload["message"] == "ça plante" and payload["client"] == "desktop" and payload["log_tail"] == ""
     assert payload["app_version"] and payload["os"]
     assert len(report.build("x" * 9000)["message"]) == report.MAX_MESSAGE
+    assert payload["category"] == "bug" and payload["category_other"] == ""
+
+
+def test_build_report_category():
+    assert report.build("m", attach_log=False, category="idea", category_other="x")["category_other"] == ""
+    other = report.build("m", attach_log=False, category="other", category_other="  une   question ")
+    assert (other["category"], other["category_other"]) == ("other", "une question")
+    assert report.build("m", attach_log=False, category="nope")["category"] == "bug"
 
 
 def test_report_is_queued_when_offline_and_sent_later():

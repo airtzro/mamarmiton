@@ -75,6 +75,7 @@ class Trashed:
     server_delete_pending: bool = False
     conflicts: list = field(default_factory=list)
     ops: list = field(default_factory=list)  # queued favourite / photo-delete operations dropped by delete
+    hidden: bool = False  # a shared recipe taken off my list (RemoteStore.hide), not deleted
 
 
 def copy_as_variant(store, recipe: Recipe) -> Recipe:

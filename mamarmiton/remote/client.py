@@ -201,16 +201,24 @@ class ApiClient:
     def get_recipe(self, recipe_id: str) -> dict:
         return self._request("GET", f"/recipes/{recipe_id}")
 
-    def put_recipe(self, recipe_id: str, recipe: dict, base_version: int | None) -> dict:
-        """Create (``base_version=None``) or update. Raises ``ConflictError``."""
-        return self._request("PUT", f"/recipes/{recipe_id}", json={"recipe": recipe,
-                                                                   "base_version": base_version})
+    def put_recipe(self, recipe_id: str, recipe: dict, base_version: int | None,
+                   variant_of: str | None = None) -> dict:
+        """Create (``base_version=None``) or update. Raises ``ConflictError``.
+        ``variant_of``: on create, the recipe this one is a variant of (it keeps that author's credit)."""
+        body = {"recipe": recipe, "base_version": base_version}
+        if variant_of:
+            body["variant_of"] = variant_of
+        return self._request("PUT", f"/recipes/{recipe_id}", json=body)
 
     def delete_recipe(self, recipe_id: str) -> None:
         self._request("DELETE", f"/recipes/{recipe_id}")
 
     def set_favorite(self, recipe_id: str, value: bool) -> None:
         self._request("PUT" if value else "DELETE", f"/recipes/{recipe_id}/favorite")
+
+    def set_hidden(self, recipe_id: str, value: bool) -> None:
+        """Take a recipe shared with me off my list (``True``) or put it back (``False``)."""
+        self._request("PUT" if value else "DELETE", f"/recipes/{recipe_id}/hidden")
 
     # -------------------------------------------------------------- images
     def upload_image(self, recipe_id: str, path: Path | str) -> dict:
@@ -260,11 +268,11 @@ class ApiClient:
 
     # -------------------------------------------------------------- shares
     def shares(self) -> dict:
-        """``{book_shared_with, books_shared_with_me, recipes_shared}``."""
+        """``{book_shared_with, books_shared_with_me, recipes_shared, hidden}``."""
         return self._request("GET", "/shares")
 
-    def share_book(self, username: str, can_edit: bool = False) -> None:
-        self._request("PUT", f"/shares/book/{username}", json={"can_edit": can_edit})
+    def share_book(self, username: str, can_edit: bool = False, can_copy: bool = False) -> None:
+        self._request("PUT", f"/shares/book/{username}", json={"can_edit": can_edit, "can_copy": can_copy})
 
     def unshare_book(self, username: str) -> None:
         self._request("DELETE", f"/shares/book/{username}")
@@ -273,8 +281,9 @@ class ApiClient:
         """Stop seeing the book of ``username`` (the receiving side)."""
         self._request("DELETE", f"/shares/received/{username}")
 
-    def share_recipe(self, recipe_id: str, username: str, can_edit: bool = False) -> None:
-        self._request("PUT", f"/recipes/{recipe_id}/shares/{username}", json={"can_edit": can_edit})
+    def share_recipe(self, recipe_id: str, username: str, can_edit: bool = False, can_copy: bool = False) -> None:
+        self._request("PUT", f"/recipes/{recipe_id}/shares/{username}",
+                      json={"can_edit": can_edit, "can_copy": can_copy})
 
     def unshare_recipe(self, recipe_id: str, username: str) -> None:
         self._request("DELETE", f"/recipes/{recipe_id}/shares/{username}")

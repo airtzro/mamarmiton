@@ -44,9 +44,18 @@ def log_tail(path: Path | None = None, lines: int = LOG_LINES, max_bytes: int = 
     return text
 
 
-def build(message: str, attach_log: bool = True) -> dict:
+CATEGORIES = ("bug", "idea", "other")
+MAX_CATEGORY_OTHER = 80
+
+
+def build(message: str, attach_log: bool = True, category: str = "bug", category_other: str = "") -> dict:
+    """``category`` is bug, idea or other; for other, ``category_other`` says what it is (in the sender's words)."""
+    if category not in CATEGORIES:
+        category = "bug"
     return {
         "message": message.strip()[:MAX_MESSAGE],
+        "category": category,
+        "category_other": " ".join(category_other.split())[:MAX_CATEGORY_OTHER] if category == "other" else "",
         "client": "desktop",
         "app_version": __version__,
         "os": platform.platform()[:300],

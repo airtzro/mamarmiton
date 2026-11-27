@@ -234,6 +234,58 @@ def test_grantee_can_leave_a_book(client, settings):
     assert client.get("/recipes", headers=soeur).json()["visible_ids"] == []
 
 
+def test_grantee_takes_one_recipe_of_a_shared_book_off_their_list(client, settings):
+    maman = register(client, settings, "maman")
+    soeur = register(client, settings, "soeur")
+    eve = register(client, settings, "eve")
+    put(client, maman)
+    put(client, maman, rid=RID2, name="Tarte")
+    client.put("/shares/book/soeur", json={"can_edit": True}, headers=maman)
+    client.put(f"/recipes/{RID}/favorite", headers=soeur)
+
+    assert client.put(f"/recipes/{RID}/hidden", headers=eve).status_code == 404  # not shared with eve
+    assert client.put(f"/recipes/{RID}/hidden", headers=maman).status_code == 422  # owners delete instead
+    assert client.put(f"/recipes/{RID}/hidden", headers=soeur).status_code == 204
+    assert client.put(f"/recipes/{RID}/hidden", headers=soeur).status_code == 204  # idempotent
+
+    assert sorted(client.get("/recipes", headers=soeur).json()["visible_ids"]) == [RID2]
+    assert client.get(f"/recipes/{RID}", headers=soeur).status_code == 404
+    assert put(client, soeur, base=1, name="x").status_code == 404
+    assert client.get(f"/recipes/{RID}", headers=maman).json()["recipe"]["nom"] == "Gâteau"  # owner untouched
+    hidden = client.get("/shares", headers=soeur).json()["hidden"]
+    assert hidden == [{"recipe_id": RID, "nom": "Gâteau", "username": "maman", "display_name": "Maman"}]
+
+    # back on the list: the next incremental sync brings it again, favourite kept
+    seq = client.get("/recipes", headers=soeur).json()["seq"]
+    assert client.delete(f"/recipes/{RID}/hidden", headers=soeur).status_code == 204
+    sync = client.get(f"/recipes?since={seq}", headers=soeur).json()
+    assert [r["id"] for r in sync["recipes"]] == [RID] and sync["favorites"] == [RID]
+    assert client.get("/shares", headers=soeur).json()["hidden"] == []
+
+
+def test_hidden_recipe_comes_back_when_shared_again_on_purpose(client, settings):
+    maman = register(client, settings, "maman")
+    soeur = register(client, settings, "soeur")
+    put(client, maman)
+    client.put("/shares/book/soeur", json={}, headers=maman)
+    client.put(f"/recipes/{RID}/hidden", headers=soeur)
+    client.put("/shares/book/soeur", json={"can_edit": True}, headers=maman)  # book again: stays off
+    assert client.get("/recipes", headers=soeur).json()["visible_ids"] == []
+    client.put(f"/recipes/{RID}/shares/soeur", json={}, headers=maman)  # this very recipe: back
+    assert client.get("/recipes", headers=soeur).json()["visible_ids"] == [RID]
+
+
+def test_hidden_list_skips_recipes_no_longer_shared(client, settings):
+    maman = register(client, settings, "maman")
+    soeur = register(client, settings, "soeur")
+    put(client, maman)
+    client.put("/shares/book/soeur", json={}, headers=maman)
+    client.put(f"/recipes/{RID}/hidden", headers=soeur)
+    client.delete("/shares/book/soeur", headers=maman)
+    assert client.get("/shares", headers=soeur).json()["hidden"] == []
+    assert client.delete(f"/recipes/{RID}/hidden", headers=soeur).status_code == 404
+
+
 # ------------------------------------------------------------------- images
 def test_image_upload_is_reencoded_and_private(client, settings):
     maman = register(client, settings, "maman")

@@ -159,6 +159,26 @@ or server busy.
 | Update | `git pull && docker compose up -d --build` |
 | Logs | `docker compose logs --tail 100 api caddy` |
 
+## Sharing levels and recipe credit
+
+A share (a whole book or one recipe) has three levels: **Lecture seule** (read
+only, no variants), **Lecture + variantes** (read, and make your own copy),
+**Modification** (edit; variants always allowed). The API stores them as
+`can_edit` + `can_copy`. Apps that send no `can_copy` keep a share's current
+setting, and a new share made by them allows variants, as before.
+
+Every recipe has a credit set by the server and never by a client
+(`author_id`, `variant_of` in `recipes`): the person who wrote it. A variant
+(`POST /recipes/{id}/variant`, or `PUT` with `"variant_of"`) keeps the author of
+its source, so the name follows every copy, even after edits, after the
+original is deleted, or after the author's account is gone. The apps show it
+quietly at the bottom of the recipe ("— Variante de « Tarte » de Maman"), and
+the desktop PDF prints it in the footer.
+
+Not prevented: anyone who can read a recipe can still retype it by hand. Old
+desktop apps (before this change) make variants without the credit; set
+`MIN_DESKTOP_VERSION` to the release that contains it to close that gap.
+
 ## Schema migrations and minimum client version
 
 The database carries `PRAGMA user_version`. At startup the server applies the
@@ -213,6 +233,8 @@ no recipe id, no text) so that after 8 weeks `python -m mamarmiton_server usage 
 which features are used (least used first). The allowed events are listed once per client
 (`mamarmiton_server/usage.py`, `mamarmiton/usage.py`, `web/usage.js`; a test keeps them equal);
 unknown ones are ignored. Clients have an opt-out switch. "Signaler un problème" posts to
-`POST /reports` (tied to the account so you can reply); read them with
+`POST /reports` (tied to the account so you can reply), with a label: `category` is `bug`
+(the default, what older apps send), `idea` or `other`; `other` needs `category_other`, the
+sender's own word for it. The admin page filters by label and can change it. Read them with
 `python -m mamarmiton_server reports [--all]` (shown ones are marked read). Tokens and passwords
 are masked in the log on the client and again on the server.

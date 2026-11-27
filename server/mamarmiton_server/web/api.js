@@ -104,6 +104,7 @@ export const api = {
   putRecipe: (id, recipe, base_version) => json(request("PUT", `/recipes/${id}`, { json: { recipe, base_version } })),
   deleteRecipe: (id) => request("DELETE", `/recipes/${id}`),
   setFavorite: (id, on) => request(on ? "PUT" : "DELETE", `/recipes/${id}/favorite`),
+  setHidden: (id, on) => request(on ? "PUT" : "DELETE", `/recipes/${id}/hidden`),
 
   uploadImage(id, file) {
     const form = new FormData();
@@ -123,9 +124,10 @@ export const api = {
   },
 
   shares: () => json(request("GET", "/shares")),
-  shareBook: (name, can_edit) => request("PUT", `/shares/book/${user(name)}`, { json: { can_edit } }),
+  shareBook: (name, can_edit, can_copy) => request("PUT", `/shares/book/${user(name)}`, { json: { can_edit, can_copy } }),
   unshareBook: (name) => request("DELETE", `/shares/book/${user(name)}`),
   leaveBook: (name) => request("DELETE", `/shares/received/${user(name)}`),
-  shareRecipe: (id, name, can_edit) => request("PUT", `/recipes/${id}/shares/${user(name)}`, { json: { can_edit } }),
+  shareRecipe: (id, name, can_edit, can_copy) => request("PUT", `/recipes/${id}/shares/${user(name)}`, { json: { can_edit, can_copy } }),
+  makeVariant: (id) => json(request("POST", `/recipes/${id}/variant`)),
   unshareRecipe: (id, name) => request("DELETE", `/recipes/${id}/shares/${user(name)}`),
 };

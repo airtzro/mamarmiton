@@ -11,7 +11,7 @@ import customtkinter as ctk
 from PIL import Image
 
 from mamarmiton import config
-from mamarmiton.models import Recipe, format_minutes
+from mamarmiton.models import Recipe, format_minutes, servings_text
 from mamarmiton.ui import art, theme
 
 log = logging.getLogger(__name__)
@@ -657,7 +657,7 @@ class RecipeCard(ctk.CTkFrame):
                      font=theme.font(13, "bold"), text_color=theme.TEXT, height=20).pack(side="left", padx=(0, 14))
         if recipe.temps_total:
             self._meta(meta, "clock", format_minutes(recipe.temps_total))
-        self._meta(meta, "users", f"{recipe.pour} pers.")
+        self._meta(meta, "users", servings_text(recipe.pour, recipe.pour_unite, short=True))
         self.shared = None
         if shared_by:
             self.shared = ctk.CTkLabel(self, text=f" Partagée par {shared_by}", image=art.icon("share", theme.ACCENT_TEXT, 14),

@@ -251,6 +251,28 @@ def test_read_only_share_and_revoke(make_store, http, tmp_path):
     assert b.get(r.id) is None and len(b) == 0
 
 
+def test_revoked_share_takes_its_tags_away(make_store):
+    from mamarmiton.search import tag_counts
+    a, b = make_store("alice"), make_store("bob")
+    theirs = recipe("Bûche")
+    theirs.tags = ["Noël", "Commun"]
+    a.add(theirs)
+    a.sync()
+    mine = recipe("Crêpes")
+    mine.tags = ["commun", "Rapide"]
+    b.add(mine)
+    b.sync()
+    a.client.share_book("bob")
+    b.sync()
+    assert {t for t, _n in tag_counts(b.all())} >= {"Noël", "Rapide"}
+    a.client.unshare_book("bob")
+    b.sync()
+    assert dict(tag_counts(b.all())) == {"commun": 1, "Rapide": 1}
+    # and not from the offline copy either
+    reopened = RemoteStore(b.client, cache_dir=b.cache_dir)
+    assert dict(tag_counts(reopened.all())) == {"commun": 1, "Rapide": 1}
+
+
 def test_leave_book_and_single_recipe_share(make_store):
     a, b = make_store("alice"), make_store("bob")
     r1, r2 = a.add(recipe("Un")), a.add(recipe("Deux"))
@@ -265,6 +287,46 @@ def test_leave_book_and_single_recipe_share(make_store):
     b.client.leave_book("alice")
     b.sync()
     assert len(b) == 0 and r2.id
+
+
+def test_hide_one_recipe_of_a_shared_book(make_store, http, tmp_path):
+    a, b = make_store("alice"), make_store("bob")
+    r1, r2 = a.add(recipe("Un")), a.add(recipe("Deux"))
+    a.sync()
+    a.client.share_book("bob")
+    b.sync()
+    mine = b.add(recipe("À moi"))
+    assert b.can_hide(r1.id) and not b.can_hide(mine.id)
+    with pytest.raises(PermissionError):
+        b.hide(mine.id)  # own recipes are deleted, not hidden
+    trashed = b.hide(r1.id)
+    assert b.get(r1.id) is None
+    assert b.sync().ok
+    assert sorted(x.nom for x in b.all()) == ["Deux", "À moi"]  # stays gone after the pull
+    a.sync()
+    assert a.get(r1.id) is not None  # the owner keeps it
+    other_device = login_store(http, tmp_path, "bob", "phone")
+    other_device.sync()
+    assert r1.id not in {x.id for x in other_device.all()}
+
+    b.restore(trashed)  # undo after the hide reached the server
+    assert b.get(r1.id) is not None
+    b.sync()
+    assert b.get(r1.id) is not None and b.client.shares()["hidden"] == []
+    other_device.sync()
+    assert r1.id in {x.id for x in other_device.all()}
+
+
+def test_hide_undone_before_sync_sends_nothing(make_store):
+    a, b = make_store("alice"), make_store("bob")
+    r1 = a.add(recipe("Un"))
+    a.sync()
+    a.client.share_book("bob")
+    b.sync()
+    b.restore(b.hide(r1.id))
+    assert b.pending_count == 0
+    b.sync()
+    assert b.get(r1.id) is not None and b.client.shares()["hidden"] == []
 
 
 # ------------------------------------------------------------------- images
@@ -509,3 +571,51 @@ def recipe_with(r, **kw):
     for k, v in kw.items():
         setattr(r, k, v)
     return r
+
+
+# ------------------------------------------------------- credit and variants
+def test_variant_rights_and_credit_follow_the_share_level(make_store, tmp_path):
+    from mamarmiton.ui import remote_logic as rl
+
+    a, b = make_store("alice"), make_store("bob")
+    r = a.add(recipe("Tarte"))
+    a.add_image(r, png(tmp_path / "t.png"))
+    a.sync()
+    assert a.credit(r.id)["author"] == "alice"
+    assert rl.credit_line(a, r.id, r.nom, {}, me="alice") == ""  # my own original: no signature on screen
+    assert rl.credit_line(a, r.id, r.nom, {"alice": "Alice"}) == "Recette de Alice"  # printed: always
+    a.client.share_recipe(r.id, "bob", can_edit=False, can_copy=False)
+    b.sync()
+    assert not b.can_copy(r.id)
+    assert rl.credit_line(b, r.id, "Tarte", {"alice": "Alice"}, me="bob") == "Recette de Alice"
+    with pytest.raises(PermissionError):
+        b.duplicate(r.id)
+    a.client.share_recipe(r.id, "bob", can_edit=False, can_copy=True)
+    b.sync()
+    assert b.can_copy(r.id)
+    copy = b.duplicate(r.id)
+    # credited straight away, before it reaches the server
+    line = rl.credit_line(b, copy.id, copy.nom, {"alice": "Alice"}, me="bob")
+    assert line == "Variante de « Tarte » de Alice"
+    b.sync()
+    assert b.access(copy.id) == "owner" and b.credit(copy.id)["author"] == "alice"
+    assert b.credit(copy.id)["variant_of"] == r.id and "variant_of" not in b._meta[copy.id]
+    server = b.client.get_recipe(copy.id)
+    assert server["credit"]["author"] == "alice" and server["owner"] == "bob" and len(server["images"]) == 1
+    copy.nom = "Ma tarte"
+    b.update(copy)
+    b.sync()
+    assert b.client.get_recipe(copy.id)["credit"]["variant_of_nom"] == "Tarte"
+
+
+def test_cache_from_before_credits_fetches_everything_once(make_store, tmp_path):
+    a = make_store("alice")
+    r = a.add(recipe("Soupe"))
+    a.sync()
+    a._meta[r.id].pop("credit")
+    a._save()
+    again = RemoteStore(a.client, cache_dir=a.cache_dir)
+    assert again._full_pull
+    again.sync()
+    assert again.credit(r.id)["author"] == "alice"
+    assert not RemoteStore(a.client, cache_dir=a.cache_dir)._full_pull

@@ -5,6 +5,7 @@ export const EVENT_LABELS = {
   recipe_create: "Créer une recette",
   recipe_edit: "Modifier une recette",
   recipe_delete: "Supprimer une recette",
+  recipe_hide: "Retirer une recette partagée",
   delete_undo: "Annuler une suppression",
   variant_create: "Créer une variante",
   search: "Rechercher",

@@ -2,7 +2,7 @@ import { api } from "./api.js";
 import { hit } from "./usage.js";
 import { h, icon, clear } from "./dom.js";
 import { allRecipes, applyEntry, canEdit, getRecipe, newId, photos, saveRecipe, setFavorite, state, sync } from "./state.js";
-import { COMMON_UNITS, joinAmountUnit, splitAmountUnit } from "./quantities.js";
+import { COMMON_UNITS, joinAmountUnit, servingsText, splitAmountUnit } from "./quantities.js";
 import { COOKING_TYPES, DISH_TYPES, MAX_TAGS, MAX_TAG_LEN, fold, normalizeTags, tagCounts } from "./search.js";
 import { busy, confirmDialog, openDialog, toast } from "./ui.js";
 
@@ -38,7 +38,7 @@ function summaryOf(recipe) {
   const ings = (recipe.ingredients || []).map((i) => (i["quantité"] ? `${i["quantité"]} ${i.nom}` : i.nom));
   return h("div", { class: "stack small" },
     h("h3", { class: "serif", text: recipe.nom || "Recette sans nom" }),
-    h("p", { class: "muted", text: `${recipe.type_plat || ""} · ${recipe.type_cuisson || ""} · préparation ${recipe.temps || 0} min · cuisson ${recipe.temps_cuisson || 0} min · ${recipe.pour || 0} pers.` }),
+    h("p", { class: "muted", text: `${recipe.type_plat || ""} · ${recipe.type_cuisson || ""} · préparation ${recipe.temps || 0} min · cuisson ${recipe.temps_cuisson || 0} min · ${servingsText(recipe.pour || 0, recipe.pour_unite, true)}` }),
     h("h4", { text: "Ingrédients" }), ings.length ? h("ul", {}, ings.map((t) => h("li", { text: t }))) : h("p", { class: "muted", text: "Aucun." }),
     h("h4", { text: "Étapes" }), (recipe.etapes || []).length ? h("ol", {}, recipe.etapes.map((t) => h("li", { text: t }))) : h("p", { class: "muted", text: "Aucune." }),
     recipe.notes ? [h("h4", { text: "Notes" }), h("p", { text: recipe.notes })] : null);
@@ -74,6 +74,11 @@ export function renderEditor(main, id, { done, cancel, draft = null }) {
   const existing = id ? getRecipe(id) : null;
   if (id && (!existing || !canEdit(existing))) { cancel(); return { update() {} }; }
   if (id) draft = null;
+  // once saved or cancelled, navigating away must not ask "abandon changes?"
+  let left = false;
+  const doneRaw = done, cancelRaw = cancel;
+  done = (rid) => { left = true; doneRaw(rid); };
+  cancel = () => { left = true; cancelRaw(); };
   const entry = id ? state.entries.get(id) : null;
   const base = entry ? structuredClone(entry.recipe) : draft && draft.recipe.source ? { source: draft.recipe.source } : {};
   const init = existing || (draft ? draft.recipe : null);  // what the fields start with
@@ -86,12 +91,14 @@ export function renderEditor(main, id, { done, cancel, draft = null }) {
   const cooking = select(COOKING_TYPES, init?.type_cuisson ?? "Sans cuisson");
   const prep = h("input", { type: "text", inputmode: "numeric", value: init?.temps ? String(init.temps) : "", placeholder: "ex. 20" });
   const cook = h("input", { type: "text", inputmode: "numeric", value: init?.temps_cuisson ? String(init.temps_cuisson) : "", placeholder: "ex. 45" });
-  const pour = h("input", { type: "number", min: 1, max: 99, inputmode: "numeric", value: String(init?.pour ?? 4) });
+  const pour = h("input", { type: "number", min: 1, max: 99, inputmode: "numeric", value: String(init?.pour ?? 4), "aria-label": "Nombre" });
+  const unite = h("input", { type: "text", maxlength: 40, value: init?.pour_unite ?? "", placeholder: "personnes", "aria-label": "Unité (personnes, crêpes, parts…)" });
   const fav = h("input", { type: "checkbox", checked: existing?.favori ?? false });
   const steps = h("textarea", { rows: 8, placeholder: "Une étape par ligne" });
   steps.value = (init?.etapes ?? []).join("\n");
   const notes = h("textarea", { rows: 4, maxlength: 20000, placeholder: "Un conseil, une variante, un souvenir…" });
   notes.value = init?.notes ?? "";
+  const source = h("input", { type: "text", maxlength: 500, value: init?.source ?? base.source ?? "", placeholder: "ex. Mamie Jeanne, ou https://…", autocomplete: "off" });
 
   // ---- tags: type + Enter or comma adds a chip
   let tags = normalizeTags(init?.tags);
@@ -210,11 +217,13 @@ export function renderEditor(main, id, { done, cancel, draft = null }) {
       temps: parseMinutes(prep.value),
       temps_cuisson: parseMinutes(cook.value),
       pour: toInt(pour.value, 4, 1),
+      pour_unite: unite.value.trim().replace(/\s+/g, " "),
       type_plat: dish.value,
       type_cuisson: cooking.value,
       ingredients,
       etapes: steps.value.split("\n").map(stripStepNumber).filter(Boolean),
       notes: notes.value,
+      source: source.value.trim().replace(/\s+/g, " "),
       tags: normalizeTags([...tags, ...tagInput.value.split(",")]),
       cree_le: base.cree_le || new Date().toISOString().slice(0, 19),
       modifie_le: new Date().toISOString().slice(0, 19),
@@ -290,13 +299,15 @@ export function renderEditor(main, id, { done, cancel, draft = null }) {
     });
   }
 
+  const dirty = () => !left && snapshot() !== initial;
+  async function confirmLeave() {
+    if (!dirty()) return true;
+    return confirmDialog({ title: draft ? "Abandonner la recette importée ?" : "Abandonner les changements ?",
+      message: draft ? "La recette lue ne sera pas enregistrée." : "Ce que vous avez écrit ne sera pas enregistré.",
+      confirmText: "Abandonner", cancelText: "Continuer à modifier", danger: true });
+  }
   async function leave() {
-    if (snapshot() !== initial) {
-      const ok = await confirmDialog({ title: draft ? "Abandonner la recette importée ?" : "Abandonner les changements ?",
-        message: draft ? "La recette lue ne sera pas enregistrée." : "Ce que vous avez écrit ne sera pas enregistré.",
-        confirmText: "Abandonner", cancelText: "Continuer à modifier", danger: true });
-      if (!ok) return;
-    }
+    if (!(await confirmLeave())) return;
     pending.forEach((p) => URL.revokeObjectURL(p.url));
     cancel();
   }
@@ -319,7 +330,9 @@ export function renderEditor(main, id, { done, cancel, draft = null }) {
       h("div", { class: "grid-3" },
         field("Préparation (minutes)", prep, { hint: "Ex. 20, ou 1h30" }),
         field("Cuisson (minutes)", cook),
-        field("Pour combien de personnes", pour)),
+        h("div", { class: "field" }, h("label", { for: "e-pour", text: "Pour" }),
+          h("div", { class: "pour-row" }, Object.assign(pour, { id: "e-pour" }), unite),
+          h("p", { class: "hint", text: "Laissez « personnes », ou écrivez crêpes, parts, verres…" }))),
       h("label", { class: "check" }, fav, h("span", { text: "Recette favorite" }))),
     h("section", { class: "card pad stack" },
       h("h2", { class: "serif", text: "Étiquettes" }),
@@ -334,7 +347,8 @@ export function renderEditor(main, id, { done, cancel, draft = null }) {
       field("Les étapes", steps, { hint: "Une étape par ligne, sans numéro." })),
     h("section", { class: "card pad stack" },
       h("h2", { class: "serif", text: "Le petit mot du chef" }),
-      field("Notes", notes)),
+      field("Notes", notes),
+      field("Source (facultatif)", source, { hint: "D'où vient la recette ? Un livre, un site, une personne…" })),
     h("section", { class: "card pad stack" },
       h("h2", { class: "serif", text: "Photos" }),
       photoGrid,
@@ -347,5 +361,5 @@ export function renderEditor(main, id, { done, cancel, draft = null }) {
         h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: leave, text: "Annuler" }), saveBtn)));
   clear(main).append(h("div", { class: "container narrow" }, form));
   if (notice) notice.focus(); else nom.focus();  // on a phone the keyboard would hide the notice
-  return { update() {} };
+  return { update() {}, dirty, confirmLeave, discard() { left = true; } };
 }

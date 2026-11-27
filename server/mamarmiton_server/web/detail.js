@@ -1,8 +1,8 @@
 import { api } from "./api.js";
 import { hit } from "./usage.js";
 import { h, icon, clear } from "./dom.js";
-import { canEdit, deleteRecipe, displayName, getRecipe, photos, state, sync } from "./state.js";
-import { frac, scaleQuantity } from "./quantities.js";
+import { canEdit, creditLine, deleteRecipe, displayName, getRecipe, hideRecipe, makeVariant, photos, state, sync } from "./state.js";
+import { frac, scaleQuantity, servingsText } from "./quantities.js";
 import { formatMinutes } from "./search.js";
 import { actionMenu, busy, confirmDialog, openDialog, toast } from "./ui.js";
 import { cover, dishClass, toggleFavorite } from "./home.js";
@@ -77,17 +77,19 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
       : h("button", { class: "btn btn-secondary", type: "button", onClick: () => {
         hit("shopping_add");
         addRecipeToShopping(recipe, servings);
-        toast(`Ajouté aux courses pour ${servings} personne${servings > 1 ? "s" : ""}.`, "ok");
+        toast(`Ajouté aux courses pour ${servingsText(servings, recipe.pour_unite)}.`, "ok");
         draw();
-      } }, icon("cart", 20), h("span", { text: inList === null ? "Ajouter aux courses" : `Courses : passer à ${servings} pers.` }));
+      } }, icon("cart", 20), h("span", { text: inList === null ? "Ajouter aux courses" : `Courses : passer à ${servingsText(servings, recipe.pour_unite, true)}` }));
 
     // rarely used actions wait behind "Plus"
     const photoInput = h("input", { type: "file", accept: "image/*", multiple: true, class: "sr-only", tabindex: "-1", "aria-hidden": "true" });
     const owner = recipe.access === "owner";
     const more = actionMenu({ items: [
       owner ? { icon: "share", text: "Partager", onClick: () => openShareDialog({ recipe }) } : null,
+      recipe.can_copy ? { icon: "copy", text: "Créer une variante", onClick: (e, button) => variant(button) } : null,
       editable ? { icon: "camera", text: "Ajouter une photo", onClick: () => photoInput.click() } : null,
-      owner ? { icon: "trash", text: "Supprimer", danger: true, onClick: (e, button) => removeRecipe(button) } : null,
+      owner ? { icon: "trash", text: "Supprimer", danger: true, onClick: (e, button) => removeRecipe(button) }
+        : { icon: "close", text: "Retirer de mes recettes", danger: true, onClick: (e, button) => hideShared(button) },
     ] });
     photoInput.addEventListener("change", () => {
       const files = [...photoInput.files];
@@ -106,6 +108,32 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
           toast(queued ? "Recette supprimée sur cet appareil. Elle le sera partout au retour de la connexion." : "Recette supprimée.", "ok");
           location.hash = "#/";
         } catch (e) { toast(e.message, "error"); }
+      });
+    }
+    async function variant(button) {
+      await busy(button, async () => {
+        try {
+          const copy = await makeVariant(id);
+          hit("variant_create");
+          toast("Variante créée : modifiez-la à votre goût.", "ok");
+          onEdit(copy.id);
+        } catch (e) { toast(e.offline ? "Pas de connexion : réessayez une fois en ligne." : e.message, "error"); }
+      });
+    }
+    async function hideShared(button) {
+      const who = displayName(recipe.owner);
+      const ok = await confirmDialog({ title: "Retirer cette recette ?", danger: true, confirmText: "Retirer",
+        message: `« ${recipe.nom} » n'apparaîtra plus dans vos recettes. Elle reste dans le carnet de ${who}. `
+          + "Vous pourrez la remettre depuis « Partager mon carnet »." });
+      if (!ok) return;
+      await busy(button, async () => {
+        try {
+          await hideRecipe(id);
+          hit("recipe_hide");
+          servingsMemo.delete(id);
+          toast("Recette retirée de votre liste.", "ok");
+          location.hash = "#/";
+        } catch (e) { toast(e.offline ? "Pas de connexion : réessayez une fois en ligne." : e.message, "error"); }
       });
     }
     const topActions = h("div", { class: "actions" },
@@ -141,7 +169,7 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
     if (recipe.temps) facts.push(["Préparation", formatMinutes(recipe.temps)]);
     if (recipe.temps_cuisson) facts.push(["Cuisson", formatMinutes(recipe.temps_cuisson)]);
     if (recipe.temps && recipe.temps_cuisson) facts.push(["Total", formatMinutes(recipe.temps + recipe.temps_cuisson)]);
-    facts.push(["Pour", `${recipe.pour} pers.`]);
+    facts.push(["Pour", servingsText(recipe.pour, recipe.pour_unite, true)]);
     const info = h("div", { class: "hero-info" },
       h("p", { class: "hero-kind" },
         h("span", { class: `rc-dish ${dishClass(recipe.type_plat)}` }, h("span", { class: "dish-dot", "aria-hidden": "true" }), recipe.type_plat),
@@ -149,7 +177,9 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
       h("h1", { class: "serif", text: recipe.nom }),
       recipe.access !== "owner"
         ? h("p", { class: "owner-note" }, icon("eye", 18), `Recette de ${displayName(recipe.owner)}`,
-          recipe.access === "read" ? " : vous pouvez la lire, pas la modifier." : " : vous pouvez la modifier.")
+          recipe.access === "read"
+            ? (recipe.can_copy ? " : vous pouvez la lire et en faire votre variante." : " : vous pouvez la lire, pas la modifier.")
+            : " : vous pouvez la modifier.")
         : null,
       h("dl", { class: "facts" }, facts.map(([label, value]) =>
         h("div", { class: "fact" }, h("dt", { text: label }), h("dd", { class: "serif", text: value })))),
@@ -160,16 +190,18 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
           onClick: () => { state.filters.text = ""; state.filters.category = ""; state.filters.book = ""; state.filters.tags = [tag]; hit("tag_filter"); location.hash = "#/"; },
           text: `#${tag}` })))
         : null,
-      recipe.source ? h("p", { class: "hint", text: `Importée depuis « ${recipe.source} »` }) : null);
+      recipe.source ? h("p", { class: "hint source-line" }, "Source : ", /^https?:\/\//i.test(recipe.source)
+        ? h("a", { href: recipe.source, target: "_blank", rel: "noopener noreferrer", text: recipe.source })
+        : recipe.source) : null);
     hero.append(info);
 
     // ---- ingredients
     const factor = frac(servings, Math.max(1, recipe.pour));
-    const stepper = h("div", { class: "stepper", role: "group", "aria-label": "Nombre de personnes" },
-      h("button", { class: "btn btn-icon btn-secondary", type: "button", "aria-label": "Une personne de moins", disabled: servings <= 1,
+    const stepper = h("div", { class: "stepper", role: "group", "aria-label": "Quantité" },
+      h("button", { class: "btn btn-icon btn-secondary", type: "button", "aria-label": "Moins", disabled: servings <= 1,
         onClick: () => { servingsMemo.set(id, Math.max(1, servings - 1)); draw(); } }, icon("minus")),
-      h("output", { class: "stepper-value", "aria-live": "polite", text: `${servings} personne${servings > 1 ? "s" : ""}` }),
-      h("button", { class: "btn btn-icon btn-secondary", type: "button", "aria-label": "Une personne de plus", disabled: servings >= 99,
+      h("output", { class: "stepper-value", "aria-live": "polite", text: servingsText(servings, recipe.pour_unite) }),
+      h("button", { class: "btn btn-icon btn-secondary", type: "button", "aria-label": "Plus", disabled: servings >= 99,
         onClick: () => { servingsMemo.set(id, Math.min(99, servings + 1)); draw(); } }, icon("plus")));
     const ingList = recipe.ingredients.length
       ? h("ul", { class: "ingredients" }, recipe.ingredients.map((ing, i) => {
@@ -184,7 +216,7 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
       h("h2", { class: "serif", text: "Ingrédients" }), stepper,
       servings !== recipe.pour
         ? h("button", { class: "btn btn-link", type: "button", onClick: () => { servingsMemo.delete(id); draw(); },
-          text: `Revenir à ${recipe.pour} personne${recipe.pour > 1 ? "s" : ""}` })
+          text: `Revenir à ${servingsText(recipe.pour, recipe.pour_unite)}` })
         : null,
       ingList);
 
@@ -211,11 +243,22 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
     const notes = recipe.notes.trim()
       ? h("section", { class: "note" }, h("h2", { class: "serif", text: "Le petit mot du chef" }), h("p", { class: "note-text", text: recipe.notes }))
       : null;
+    const when = (iso) => {
+      const d = new Date(iso);
+      return isNaN(d) ? "date inconnue" : `${d.toLocaleDateString("fr-FR")} à ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
+    };
+    // the author's credit signs the page, quietly; nobody can edit it away. Not repeated when the
+    // note under the title already says the same.
+    let credit = creditLine(recipe);
+    if (recipe.access !== "owner" && credit === `Recette de ${displayName(recipe.owner)}`) credit = "";
+    const signature = credit ? h("p", { class: "credit serif", text: `— ${credit}` }) : null;
+    const dates = h("p", { class: "hint", text: [recipe.cree_le && `Créée le ${when(recipe.cree_le)}`,
+      recipe.modifie_le && `modifiée le ${when(recipe.modifie_le)}`].filter(Boolean).join(" · ") });
 
     clear(main).append(h("div", { class: "container detail" },
       h("div", { class: "detail-bar" }, back, topActions),
       hero,
-      h("div", { class: "detail-body" }, ingredients, h("div", { class: "stack" }, steps, notes))));
+      h("div", { class: "detail-body" }, ingredients, h("div", { class: "stack" }, steps, notes, h("div", {}, signature, dates)))));
   }
   draw();
   return { update: draw };

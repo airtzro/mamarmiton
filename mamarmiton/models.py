@@ -16,7 +16,7 @@ from typing import Any
 
 from mamarmiton.quantities import split_quantity_and_name
 
-DISH_TYPES = ["Entrée", "Plat", "Dessert", "Pain"]
+DISH_TYPES = ["Entrée", "Plat", "Accompagnement", "Dessert", "Pain"]
 COOKING_TYPES = ["Four", "Poêle", "Casserole", "Vapeur", "Micro-ondes", "Sans cuisson"]
 
 DEFAULT_DISH = "Plat"
@@ -146,6 +146,7 @@ class Recipe:
     favori: bool = False
     images: list[str] = field(default_factory=list)  # file names inside images/<id>/
     tags: list[str] = field(default_factory=list)  # free labels: "Noël", "sans gluten"...
+    pour_unite: str = ""  # what "pour" counts: "" = personnes, else e.g. "crêpes"
     source: str = ""  # e.g. the PDF file name it was imported from
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     cree_le: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -165,6 +166,7 @@ class Recipe:
             "temps": self.temps,
             "temps_cuisson": self.temps_cuisson,
             "pour": self.pour,
+            "pour_unite": self.pour_unite,
             "type_plat": self.type_plat,
             "type_cuisson": self.type_cuisson,
             "ingredients": [i.to_dict() for i in self.ingredients],
@@ -194,6 +196,7 @@ class Recipe:
             temps=parse_minutes(data.get("temps")),
             temps_cuisson=parse_minutes(data.get("temps_cuisson")),
             pour=parse_int(data.get("pour"), default=4, minimum=1),
+            pour_unite=" ".join(str(data.get("pour_unite") or "").split())[:40],
             type_plat=_normalize_choice(data.get("type_plat"), DISH_TYPES, DEFAULT_DISH),
             type_cuisson=_normalize_choice(data.get("type_cuisson"), COOKING_TYPES, DEFAULT_COOKING),
             ingredients=[i for i in (Ingredient.from_dict(x) for x in ingredients_raw) if i],
@@ -210,6 +213,19 @@ class Recipe:
         if data.get("cree_le"):
             kwargs["cree_le"] = str(data["cree_le"])
         return cls(**kwargs)
+
+
+def servings_text(n: int, unite: str = "", short: bool = False) -> str:
+    """"6 personnes" / "6 pers." / "6 crêpes" / "1 crêpe" (the unit can be typed singular or plural)."""
+    unit = " ".join(unite.split())
+    if not unit:
+        return f"{n} pers." if short else f"{n} personne{'s' if n > 1 else ''}"
+    head, _, tail = unit.partition(" ")  # "parts de gâteau": only the first word agrees
+    if n > 1 and head[-1:].lower() not in "sxz":
+        head += "s"
+    elif n <= 1 and len(head) > 2 and head[-1:].lower() in "sx" and not head.lower().endswith("ss"):
+        head = head[:-1]
+    return f"{n} {' '.join(filter(None, (head, tail)))}"
 
 
 def parse_ingredient_lines(text: str) -> list[Ingredient]:

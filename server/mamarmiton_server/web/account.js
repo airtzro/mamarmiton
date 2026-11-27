@@ -15,14 +15,37 @@ function field(label, input) {
  * The "Signaler un problème" form, drawn into `body`. `back` runs on the secondary button,
  * `sent` once the message is delivered.
  */
+// What the message is about. "other" asks the person to say what it is.
+const KINDS = [
+  ["bug", "Un problème", "Décrivez ce qui s'est passé, avec vos mots."],
+  ["idea", "Une idée", "Qu'aimeriez-vous que Mamarmiton sache faire ?"],
+  ["other", "Autre chose", "Votre message, avec vos mots."],
+];
+
 function buildReportForm(body, { back, backText, sent }) {
+  let kind = "bug";
   const message = h("textarea", { rows: 6, maxlength: 4000, required: true, "aria-label": "Votre message",
-    placeholder: "Décrivez ce qui s'est passé, avec vos mots." });
+    placeholder: KINDS[0][2] });
+  const other = h("input", { type: "text", maxlength: 80, placeholder: "Par exemple : une question, un merci…" });
+  const otherField = field("De quoi s'agit-il ?", other);
+  otherField.hidden = true;
+  const kindButtons = KINDS.map(([value, label, placeholder]) => h("button", {
+    class: `chip-btn chip${value === kind ? " is-on" : ""}`, type: "button", "aria-pressed": String(value === kind),
+    text: label,
+    onClick: (e) => {
+      kind = value;
+      for (const b of kindButtons) { const on = b === e.currentTarget; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); }
+      message.placeholder = placeholder;
+      otherField.hidden = value !== "other";
+      if (value === "other") other.focus();
+    } }));
   const attach = h("input", { type: "checkbox", id: "report-log", checked: true });
   const error = h("p", { class: "form-error", role: "alert" });
   const send = h("button", { class: "btn btn-primary", type: "submit", text: "Envoyer" });
   const form = h("form", { class: "stack", novalidate: true },
     h("p", { text: "Votre message arrive directement à la personne qui s'occupe de Mamarmiton." }),
+    h("div", { class: "row wrap", role: "group", "aria-label": "C'est à propos de" }, kindButtons),
+    otherField,
     message,
     h("label", { class: "row", for: "report-log" }, attach, h("span", { text: "Joindre le journal des erreurs (aide à comprendre)" })),
     error,
@@ -30,9 +53,10 @@ function buildReportForm(body, { back, backText, sent }) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     error.textContent = "";
+    if (kind === "other" && !other.value.trim()) { error.textContent = "Dites en quelques mots de quoi il s'agit."; other.focus(); return; }
     if (!message.value.trim()) { error.textContent = "Écrivez quelques mots avant d'envoyer."; return; }
     await busy(send, async () => {
-      try { await api.sendReport(buildReport(message.value, attach.checked)); toast("Merci, votre message a été envoyé.", "ok"); sent(); }
+      try { await api.sendReport(buildReport(message.value, attach.checked, window, { category: kind, categoryOther: other.value })); toast("Merci, votre message a été envoyé.", "ok"); sent(); }
       catch (err) { error.textContent = err.offline ? "Pas de connexion pour le moment. Réessayez plus tard." : err.message; }
     });
   });

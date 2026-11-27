@@ -33,6 +33,7 @@ export function recipeOf(entry) {
     temps: r.temps || 0,
     temps_cuisson: r.temps_cuisson || 0,
     pour: r.pour || 4,
+    pour_unite: r.pour_unite || "",
     type_plat: r.type_plat || "Plat",
     type_cuisson: r.type_cuisson || "Sans cuisson",
     ingredients: Array.isArray(r.ingredients) ? r.ingredients.map((i) => ({ nom: i.nom || "", quantite: i["quantité"] || "" })) : [],
@@ -45,6 +46,9 @@ export function recipeOf(entry) {
     favori: state.favorites.has(entry.id),
     access: entry.access,
     owner: entry.owner,
+    // may I make my own variant? (older servers send nothing: variants were always allowed)
+    can_copy: entry.access === "owner" || entry.access === "edit" || entry.can_copy !== false,
+    credit: entry.credit || null,  // {author, author_name, variant_of, variant_of_nom}, set by the server
     version: entry.version,
     images: entry.images || [],
   };
@@ -53,6 +57,23 @@ export function recipeOf(entry) {
 export const allRecipes = () => [...state.entries.values()].map(recipeOf);
 export const getRecipe = (id) => (state.entries.has(id) ? recipeOf(state.entries.get(id)) : null);
 export const canEdit = (recipe) => recipe.access === "owner" || recipe.access === "edit";
+
+/**
+ * Who wrote the recipe: "Recette de Maman", "Variante de « Tarte » de Maman". "" for my own
+ * originals (no need to sign my own page), and for recipes the server has not credited yet.
+ */
+export function creditLine(recipe) {
+  const c = recipe.credit;
+  if (!c) return "";
+  const mine = state.me && c.author === state.me.username;
+  const name = c.author ? displayName(c.author) : c.author_name || "";
+  if (c.variant_of) {
+    const from = (c.variant_of_nom || "").trim();
+    if (mine || !name) return from ? `Variante de « ${from} »` : "Variante";
+    return from ? `Variante de « ${from} » de ${name}` : `Variante d'une recette de ${name}`;
+  }
+  return mine || !name ? "" : `Recette de ${name}`;
+}
 
 export function displayName(username) {
   if (!username) return "";
@@ -169,6 +190,8 @@ export async function hydrate(username) {
   state.entries = new Map(snap.entries.map((e) => [e.id, e]));
   state.favorites = new Set(snap.favorites);
   state.seq = Number(snap.seq) || 0;
+  // a copy saved before recipes carried their author's credit: fetch everything once
+  if (snap.entries.some((e) => e.version !== null && !("credit" in e))) state.seq = 0;
   state.users = Array.isArray(snap.users) ? snap.users : [];
   await refreshPending();
   return true;
@@ -229,6 +252,22 @@ export async function deleteRecipe(id) {
   }
   await queueDelete(id);
   return { queued: true };
+}
+
+/** Take a recipe someone shared with me off my list (needs the connection: nothing is queued). */
+export async function hideRecipe(id) {
+  await api.setHidden(id, true);
+  dropRecipe(id);
+  await persist();
+}
+
+/** Copy a recipe into my book as "<nom> (variante)" with its photos; the author's credit stays on it.
+ * Needs the connection. Returns the new recipe. */
+export async function makeVariant(id) {
+  const entry = await api.makeVariant(id);
+  applyEntry(entry);
+  await persist();
+  return recipeOf(entry);
 }
 
 export async function setFavorite(id, on) {

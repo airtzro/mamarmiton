@@ -175,12 +175,55 @@ CREATE INDEX reports_unread ON reports(read_at, id);
 """
 
 
+def _m3_report_categories(conn: sqlite3.Connection) -> None:
+    """A label on each message: bug, idea or other (with the sender's own word for "other").
+    Every message sent before this was a "Signaler un problème", so it becomes a bug."""
+    conn.execute("ALTER TABLE reports ADD COLUMN category TEXT NOT NULL DEFAULT 'bug'")
+    conn.execute("ALTER TABLE reports ADD COLUMN category_other TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE INDEX reports_category ON reports(category, id)")
+
+
+def _m4_hidden_recipes(conn: sqlite3.Connection) -> None:
+    """Recipes someone shared with me that I took off my list (one by one, e.g. from a shared book).
+    The owner's recipe is untouched; only this person stops seeing it."""
+    conn.execute("""CREATE TABLE hidden_recipes (
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        recipe_id  TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, recipe_id)
+    )""")
+
+
+def _m5_credit_and_copy_rights(conn: sqlite3.Connection) -> None:
+    """Who created a recipe, kept for good, and whether a share lets the person make variants.
+
+    ``author_id`` is the person who wrote the recipe in the first place. A variant keeps the author of
+    the recipe it comes from (and ``variant_of`` / ``variant_of_nom`` say which one), so the credit
+    follows every copy. Only the server writes these columns; editing a recipe never changes them.
+    ``author_name`` keeps the author's name for when their account is gone but a variant remains.
+
+    ``can_copy`` on a share: may the person make their own variant? Shares made before this keep
+    allowing it, as the apps always did.
+    """
+    conn.execute("ALTER TABLE recipes ADD COLUMN author_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
+    conn.execute("ALTER TABLE recipes ADD COLUMN author_name TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE recipes ADD COLUMN variant_of TEXT")
+    conn.execute("ALTER TABLE recipes ADD COLUMN variant_of_nom TEXT NOT NULL DEFAULT ''")
+    conn.execute("UPDATE recipes SET author_id = owner_id, "
+                 "author_name = (SELECT display_name FROM users WHERE users.id = recipes.owner_id)")
+    conn.execute("ALTER TABLE book_shares ADD COLUMN can_copy INTEGER NOT NULL DEFAULT 1")
+    conn.execute("ALTER TABLE recipe_shares ADD COLUMN can_copy INTEGER NOT NULL DEFAULT 1")
+
+
 # Ordered, append-only: (version, function(conn)). Never edit or reorder a released migration.
 # A migration runs inside the transaction that also bumps ``user_version``: just execute SQL,
 # never commit. See "Schema migrations" in server/README.md.
 MIGRATIONS: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _m1_baseline),
     (2, _m2_usage_and_reports),
+    (3, _m3_report_categories),
+    (4, _m4_hidden_recipes),
+    (5, _m5_credit_and_copy_rights),
 ]
 
 

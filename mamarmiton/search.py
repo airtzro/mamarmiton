@@ -67,7 +67,7 @@ def matches(recipe: Recipe, f: Filters) -> bool:
     words = fold(f.text).split()
     if words:
         haystack = " ".join([fold(recipe.nom), *(fold(i.nom) for i in recipe.ingredients),
-                             *(fold(t) for t in recipe.tags)])
+                             *(fold(t) for t in recipe.tags), fold(recipe.source)])
         if not all(w in haystack for w in words):
             return False
     return True

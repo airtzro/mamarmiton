@@ -132,7 +132,7 @@ function buildShell() {
   themeBtn.addEventListener("click", () => { toggleTheme(); paintTheme(); });
   paintTheme();
   topbar = h("header", { class: "topbar" },
-    h("a", { class: "brand", href: "#/", "aria-label": "Mamarmiton, retour aux recettes" },
+    h("a", { class: "brand", href: "#/", "aria-label": "Mamarmiton, retour aux recettes", onClick: goHome },
       h("img", { src: "/app/icon.svg", alt: "", width: 36, height: 36 }), h("span", { class: "serif", text: "Mamarmiton" })),
     h("div", { class: "topbar-actions" },
       h("a", { class: "btn btn-accent", href: "#/nouvelle", "aria-label": "Nouvelle recette" }, icon("plus", 20), h("span", { class: "btn-label", text: "Nouvelle recette" })),
@@ -147,6 +147,13 @@ function buildShell() {
   const report = h("button", { class: "report-fab", type: "button", "aria-label": "Signaler un problème", title: "Signaler un problème",
     onClick: openReportDialog }, icon("message", 24), h("span", { class: "report-fab-label", text: "Signaler un problème" }));
   clear(root).append(topbar, main, report);
+}
+
+// the logo: back to the full recipe list (search, filters and open book cleared, sort kept)
+function goHome() {
+  state.filters = { ...state.filters, text: "", category: "", tags: [], book: null };
+  const onHome = !location.hash || location.hash === "#/";
+  if (onHome && view?.kind === "home") route();  // no hashchange fires, so redraw by hand
 }
 
 // ----------------------------------------------------------------- routing
@@ -180,7 +187,21 @@ function route() {
   }
   if (view.kind !== "editor") main.focus({ preventScroll: true });
 }
-window.addEventListener("hashchange", route);
+// leaving the editor with unsaved changes (Courses, logo, back button…) asks first instead of losing them
+window.addEventListener("hashchange", async (e) => {
+  if (view?.kind === "editor" && view.dirty?.()) {
+    const target = location.hash;
+    history.replaceState(null, "", new URL(e.oldURL).hash);  // stay put without re-rendering the form
+    if (!(await view.confirmLeave())) return;
+    view.discard();
+    location.hash = target;
+    return;
+  }
+  route();
+});
+window.addEventListener("beforeunload", (e) => {
+  if (view?.kind === "editor" && view.dirty?.()) e.preventDefault();  // reload / close tab
+});
 
 // -------------------------------------------------------------------- sync
 async function refresh() {
