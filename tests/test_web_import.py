@@ -134,3 +134,12 @@ def test_network_error_message(monkeypatch):
     monkeypatch.setattr(web.urllib.request, "urlopen", boom)
     with pytest.raises(WebImportError, match="Impossible de joindre"):
         web.import_url("https://nowhere.invalid/")
+
+
+def test_download_image_refuses_local_schemes(tmp_path):
+    from mamarmiton.importers.web import download_image
+
+    secret = tmp_path / "secret.png"
+    from PIL import Image
+    Image.new("RGB", (4, 4)).save(secret)
+    assert download_image(secret.as_uri(), tmp_path / "out") is None

@@ -89,6 +89,8 @@ def fetch_html(url: str) -> str:
 
 def download_image(url: str, folder: Path) -> Path | None:
     """Fetch the recipe photo into ``folder``; returns None when it is not a usable image."""
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        return None  # never let a page point us at file:// or other local schemes
     try:
         data, _ = _open(url, "image/*", MAX_IMAGE_BYTES)
         from io import BytesIO
