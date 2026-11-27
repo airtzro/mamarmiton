@@ -85,7 +85,7 @@ written by `ops/backup-cron.sh`.
 
 ## Web version
 
-The server also serves the web version of the app at its root address, for example `https://<name>.duckdns.org/` (its files are under `/app/`). Nothing to install: open the address in a phone browser, log in, and use "Add to home screen" for an icon. It has the same accounts, sharing and conflict handling as the desktop app, but no PDF import and no offline use.
+The server also serves the web version of the app at its root address, for example `https://<name>.duckdns.org/` (its files are under `/app/`). Nothing to install: open the address in a phone browser, log in, and use "Add to home screen" for an icon. It has the same accounts, sharing and conflict handling as the desktop app, plus "Importer" (photos, PDFs, documents or pasted text, read on the server; see "Import automatique" below).
 
 With the router forwarding public port 51820 to the NAS (as in the current setup, and the desktop app's default URL), the address is `https://<name>.duckdns.org:51820/`.
 
