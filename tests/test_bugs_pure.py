@@ -43,3 +43,22 @@ def test_pdf_export_survives_line_break_in_quantity():
     from mamarmiton.models import Ingredient
     recipe = Recipe(nom="Tarte", ingredients=[Ingredient("farine", "100 g\nenviron"), Ingredient("sel", "")])
     assert len(export.render_recipe_pages(recipe, dpi=40)) == 1
+
+
+def test_import_url_removes_temp_folder_when_photo_fails(monkeypatch, tmp_path):
+    page = ('<script type="application/ld+json">{"@type":"Recipe","name":"T","image":"https://x.fr/a.jpg",'
+            '"recipeIngredient":["1 oeuf"]}</script>')
+    made = []
+    real = web.tempfile.mkdtemp
+
+    def fake_mkdtemp(*a, **k):
+        d = real(*a, dir=str(tmp_path), **{kk: v for kk, v in k.items() if kk != "dir"})
+        made.append(d)
+        return d
+
+    monkeypatch.setattr(web.tempfile, "mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(web, "fetch_html", lambda url: page)
+    monkeypatch.setattr(web, "download_image", lambda url, folder: None)
+    result = web.import_url("https://x.fr/r")
+    assert result.images == [] and result.warnings
+    assert made and not any(__import__("os").path.exists(d) for d in made)

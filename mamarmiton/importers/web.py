@@ -6,6 +6,7 @@ import html
 import json
 import logging
 import re
+import shutil
 import tempfile
 import urllib.error
 import urllib.parse
@@ -367,5 +368,6 @@ def import_url(text: str, progress: Progress | None = None) -> ImportResult:
                 images.append(path)
                 break
         if not images:
+            shutil.rmtree(folder, ignore_errors=True)  # nothing downloaded: do not leave an empty folder behind
             warnings.append("La photo de la recette n'a pas pu être récupérée.")
     return ImportResult(recipe=recipe, images=images, method="site", warnings=warnings)

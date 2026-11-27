@@ -157,3 +157,38 @@ def test_editor_suggestions_do_not_leak(app):
     _pump(app, 10)
     flow = app.editor.tag_suggestions
     assert len(flow.winfo_children()) == len(flow.items)
+
+
+def test_url_import_closed_mid_fetch_cleans_up_and_stays_quiet(app, monkeypatch, tmp_path):
+    import threading
+    import time
+    from mamarmiton.importers import ImportResult
+    from mamarmiton.ui import dialogs
+
+    folder = tmp_path / "dl"
+    folder.mkdir()
+    photo = folder / "photo.jpg"
+    photo.write_bytes(b"x")
+    gate = threading.Event()
+
+    def slow(url, progress=None):
+        progress("Connexion…")
+        gate.wait(5)
+        return ImportResult(recipe=Recipe(nom="Importée"), images=[photo], method="site")
+
+    monkeypatch.setattr(dialogs, "import_url", slow)
+    got = []
+    dlg = dialogs.UrlImportDialog(app, got.append)
+    _pump(app)
+    dlg.entry.insert(0, "https://exemple.fr/recette")
+    dlg._start()
+    _pump(app)
+    dlg.close()
+    _pump(app)
+    gate.set()
+    for _ in range(30):
+        time.sleep(0.1)
+        _pump(app, 2)
+    assert got == []
+    assert not folder.exists()
+    assert app.current is not app.editor
