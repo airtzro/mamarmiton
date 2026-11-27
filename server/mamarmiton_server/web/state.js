@@ -2,6 +2,7 @@
 import { ApiError, api } from "./api.js";
 import * as store from "./offline.js";
 import { toast } from "./ui.js";
+import { normalizeTags } from "./search.js";
 
 export const state = {
   me: null,                 // {username, display_name, is_admin}
@@ -9,7 +10,7 @@ export const state = {
   entries: new Map(),       // id -> server entry {id, recipe, version, owner, access, images}
   favorites: new Set(),
   seq: 0,
-  filters: { text: "", category: "", sort: "Favoris d'abord" },
+  filters: { text: "", category: "", tags: [], sort: "Favoris d'abord" },
 };
 
 export function resetState() {
@@ -19,7 +20,7 @@ export function resetState() {
   state.entries = new Map();
   state.favorites = new Set();
   state.seq = 0;
-  state.filters = { text: "", category: "", sort: "Favoris d'abord" };
+  state.filters = { text: "", category: "", tags: [], sort: "Favoris d'abord" };
   photos.clear();
 }
 
@@ -37,6 +38,7 @@ export function recipeOf(entry) {
     ingredients: Array.isArray(r.ingredients) ? r.ingredients.map((i) => ({ nom: i.nom || "", quantite: i["quantité"] || "" })) : [],
     etapes: Array.isArray(r.etapes) ? r.etapes : [],
     notes: r.notes || "",
+    tags: normalizeTags(r.tags),
     source: r.source || "",
     cree_le: r.cree_le || "",
     modifie_le: r.modifie_le || "",

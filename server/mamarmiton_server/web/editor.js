@@ -1,8 +1,8 @@
 import { api } from "./api.js";
 import { h, icon, clear } from "./dom.js";
-import { applyEntry, canEdit, getRecipe, newId, photos, saveRecipe, setFavorite, state, sync } from "./state.js";
+import { allRecipes, applyEntry, canEdit, getRecipe, newId, photos, saveRecipe, setFavorite, state, sync } from "./state.js";
 import { COMMON_UNITS, joinAmountUnit, splitAmountUnit } from "./quantities.js";
-import { COOKING_TYPES, DISH_TYPES } from "./search.js";
+import { COOKING_TYPES, DISH_TYPES, MAX_TAGS, MAX_TAG_LEN, fold, normalizeTags, tagCounts } from "./search.js";
 import { busy, confirmDialog, openDialog, toast } from "./ui.js";
 
 const stripStepNumber = (line) =>
@@ -87,6 +87,41 @@ export function renderEditor(main, id, { done, cancel }) {
   const notes = h("textarea", { rows: 4, maxlength: 20000, placeholder: "Un conseil, une variante, un souvenir…" });
   notes.value = existing?.notes ?? "";
 
+  // ---- tags: type + Enter or comma adds a chip
+  let tags = normalizeTags(existing?.tags);
+  const tagInput = h("input", { type: "text", maxlength: MAX_TAG_LEN * 3, placeholder: "ex. Noël", autocomplete: "off",
+    enterkeyhint: "done", "aria-label": "Ajouter une étiquette" });
+  const tagChips = h("div", { class: "chips tag-chips-edit" });
+  const tagSuggest = h("div", { class: "chips" });
+  const knownTags = tagCounts(allRecipes());
+  function addTags(...names) { tags = normalizeTags([...tags, ...names]); drawTags(); }
+  function drawTags() {
+    clear(tagChips).append(...tags.map((t) => h("button", { class: "chip chip-btn is-on", type: "button",
+      "aria-label": `Retirer l'étiquette ${t}`, onClick: () => { tags = tags.filter((x) => fold(x) !== fold(t)); drawTags(); },
+      text: `${t}  ✕` })));
+    const typed = fold(tagInput.value);
+    const have = new Set(tags.map(fold));
+    const options = knownTags.filter(({ tag }) => !have.has(fold(tag)) && fold(tag).includes(typed)).slice(0, 12);
+    clear(tagSuggest).append(...options.map(({ tag }) => h("button", { class: "chip chip-btn", type: "button",
+      onClick: () => { tagInput.value = ""; addTags(tag); }, text: tag })));
+    tagInput.disabled = tags.length >= MAX_TAGS;
+  }
+  tagInput.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();  // Enter adds the tag, it must not submit the form
+    const text = tagInput.value;
+    tagInput.value = "";
+    addTags(...text.split(","));
+  });
+  tagInput.addEventListener("input", () => {
+    if (tagInput.value.includes(",")) {
+      const done = tagInput.value.slice(0, tagInput.value.lastIndexOf(","));
+      tagInput.value = tagInput.value.slice(tagInput.value.lastIndexOf(",") + 1).trimStart();
+      addTags(...done.split(","));
+    } else drawTags();
+  });
+  drawTags();
+
   // ---- ingredient rows
   const datalist = h("datalist", { id: "units" }, COMMON_UNITS.map((u) => h("option", { value: u })));
   const rowsBox = h("div", { class: "ing-rows" });
@@ -167,6 +202,7 @@ export function renderEditor(main, id, { done, cancel }) {
       ingredients,
       etapes: steps.value.split("\n").map(stripStepNumber).filter(Boolean),
       notes: notes.value,
+      tags: normalizeTags([...tags, ...tagInput.value.split(",")]),
       cree_le: base.cree_le || new Date().toISOString().slice(0, 19),
       modifie_le: new Date().toISOString().slice(0, 19),
     };
@@ -262,6 +298,10 @@ export function renderEditor(main, id, { done, cancel }) {
         field("Cuisson (minutes)", cook),
         field("Pour combien de personnes", pour)),
       h("label", { class: "check" }, fav, h("span", { text: "Recette favorite" }))),
+    h("section", { class: "card pad stack" },
+      h("h2", { class: "serif", text: "Étiquettes" }),
+      h("p", { class: "hint", text: "Pour retrouver la recette : Noël, rapide, sans gluten… Tapez un mot puis Entrée (ou une virgule)." }),
+      tagInput, tagChips, tagSuggest),
     h("section", { class: "card pad stack" },
       h("h2", { class: "serif", text: "Ingrédients" }),
       h("p", { class: "hint", text: "Un ingrédient par ligne : son nom, la quantité (ex. 500 ou 1/2) et l'unité." }),

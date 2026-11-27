@@ -17,8 +17,8 @@ import customtkinter as ctk
 
 from mamarmiton import APP_NAME, __version__, config, updates
 from mamarmiton.importers import ImportResult
-from mamarmiton.models import DISH_TYPES, Recipe
-from mamarmiton.search import Filters, search
+from mamarmiton.models import DISH_TYPES, Recipe, fold
+from mamarmiton.search import Filters, search, tag_counts
 from mamarmiton.shopping import ShoppingState, build_list
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES, Settings
 from mamarmiton.remote import AuthError, OfflineError, RemoteStore, clear_account, open_store
@@ -33,7 +33,7 @@ from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, UrlImportDialog, ask
 from mamarmiton.ui.editor import EditorView
 from mamarmiton.ui.home import HomeView
 from mamarmiton.ui.shopping import ShoppingView
-from mamarmiton.ui.widgets import IconLine, NavItem, Toast, UpdateBanner, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
+from mamarmiton.ui.widgets import IconLine, NavItem, ScrollFrame, Toast, UpdateBanner, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ PLURALS = {"Entrée": "Entrées", "Plat": "Plats", "Dessert": "Desserts", "Pain"
 
 class Sidebar(ctk.CTkFrame):
     WIDTH = 264
+    TAGS_SHOWN = 6
 
     def __init__(self, master, app: "App"):
         super().__init__(master, fg_color=theme.SIDEBAR, corner_radius=0, width=self.WIDTH)
@@ -71,11 +72,14 @@ class Sidebar(ctk.CTkFrame):
         self._nav(FAVORITES, "Favoris", icon="star")
         self._nav(SHOPPING, "Liste de courses", icon="cart")
         self.shopping_active = False
+        self.tags_expanded = False
+        self._tags_signature = None
 
         ctk.CTkLabel(self, text="CATÉGORIES", font=theme.font(11, "bold"), text_color=theme.SIDEBAR_MUTED,
                      anchor="w").pack(fill="x", padx=26, pady=(22, 4))
         for dish in DISH_TYPES:
             self._nav(dish, PLURALS.get(dish, dish), dot=theme.dish(dish)["dot"])
+        self.tag_box = ctk.CTkFrame(self, fg_color="transparent")  # filled and packed by update_tags
 
         theme.primary_button(bottom, text="Nouvelle recette", image=art.icon("plus", theme.ON_ACCENT, 18),
                              compound="left", height=46, command=app.new_recipe).pack(fill="x")
@@ -186,6 +190,47 @@ class Sidebar(ctk.CTkFrame):
         for dish in DISH_TYPES:
             self.items[dish].set_count(sum(r.type_plat == dish for r in recipes))
         self.update_shopping_count()
+        self.update_tags(recipes)
+
+    def update_tags(self, recipes: list[Recipe]) -> None:
+        """The "Étiquettes" section: the tags of the book with their counts, most used first."""
+        counts = tag_counts(recipes)
+        active = tuple(sorted(fold(t) for t in self.app.home.tags))
+        signature = (tuple(counts), active, self.tags_expanded)
+        if signature == self._tags_signature:
+            return
+        self._tags_signature = signature
+        for child in self.tag_box.winfo_children():
+            child.destroy()
+        if not counts:
+            self.tag_box.pack_forget()
+            return
+        if not self.tag_box.winfo_ismapped():
+            self.tag_box.pack(fill="x")
+        ctk.CTkLabel(self.tag_box, text="ÉTIQUETTES", font=theme.font(11, "bold"), text_color=theme.SIDEBAR_MUTED,
+                     anchor="w").pack(fill="x", padx=26, pady=(18, 4))
+        many = len(counts) > self.TAGS_SHOWN
+        shown = counts if self.tags_expanded else counts[:self.TAGS_SHOWN]
+        parent = self.tag_box
+        if self.tags_expanded and many:
+            parent = ScrollFrame(self.tag_box, height=200)
+            parent.pack(fill="x", padx=4)
+        for tag, n in shown:
+            label = tag if len(tag) <= 20 else tag[:19] + "…"
+            item = NavItem(parent, label, command=lambda t=tag: self.app.toggle_tag(t), dot="#A88E76", height=34)
+            item.pack(fill="x", padx=12 if parent is self.tag_box else 4, pady=1)
+            item.set_count(n)
+            item.set_active(fold(tag) in active)
+        if many:
+            more = ctk.CTkButton(self.tag_box, text="Réduire" if self.tags_expanded else f"Voir tout ({len(counts)})",
+                                 height=30, corner_radius=8, fg_color="transparent", hover_color=theme.SIDEBAR_HOVER,
+                                 text_color=theme.SIDEBAR_ACCENT, font=theme.font(13, "bold"), anchor="w",
+                                 command=self._toggle_tags_expanded)
+            more.pack(fill="x", padx=16, pady=(2, 0))
+
+    def _toggle_tags_expanded(self) -> None:
+        self.tags_expanded = not self.tags_expanded
+        self.update_tags(self.app.store.all())
 
     def title(self) -> str:
         if self.category is None:
@@ -339,6 +384,23 @@ class App(ctk.CTk):
             return
         self.shopping_view.show()
         self._switch(self.shopping_view)
+
+    def toggle_tag(self, tag: str) -> None:
+        """Add or remove a tag filter (sidebar, chips above the grid)."""
+        if not self.can_leave_editor():
+            return
+        self.home.toggle_tag(tag)
+        self.go_home()
+
+    def filter_by_tag(self, tag: str) -> None:
+        """Home, showing only the recipes with ``tag`` (from a recipe's tag chip)."""
+        if not self.can_leave_editor():
+            return
+        self.home.clear_filters(silent=True)
+        self.sidebar.category = None
+        self.sidebar._highlight()
+        self.home.tags = [tag]
+        self.go_home()
 
     def reset_filters(self) -> None:
         self.home.clear_filters(silent=True)

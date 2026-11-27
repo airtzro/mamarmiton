@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING, Callable
 
 import customtkinter as ctk
 
-from mamarmiton.models import COOKING_TYPES, DISH_TYPES, Ingredient, Recipe, parse_int, parse_minutes
+from mamarmiton.models import (COOKING_TYPES, DISH_TYPES, MAX_TAGS, Ingredient, Recipe, fold,
+                               normalize_tags, parse_int, parse_minutes)
 from mamarmiton.quantities import COMMON_UNITS, join_amount_unit, split_amount_unit
 from mamarmiton.ui import art, theme
-from mamarmiton.ui.widgets import Choice, ScrollFrame
+from mamarmiton.search import tag_counts
+from mamarmiton.ui.widgets import Choice, FlowFrame, ScrollFrame
 
 if TYPE_CHECKING:
     from mamarmiton.ui.app import App
@@ -278,6 +280,21 @@ class EditorView(ctk.CTkFrame):
         self.s_fav.grid(row=0, column=1, sticky="w", padx=(28, 0), pady=(22, 0))
         self._fav_stacked = False
 
+        # --- tags
+        card = self._section(col, "Étiquettes", "Pour retrouver la recette : Noël, rapide, sans gluten… "
+                             "Tapez un mot puis Entrée (ou une virgule).")
+        self.tags = list(r.tags)
+        self.e_tag = theme.entry(card, placeholder_text="ex. Noël")
+        self.e_tag.pack(fill="x")
+        self.e_tag.bind("<Return>", lambda _e: self._commit_tag_text())
+        self.e_tag.bind("<KeyRelease>", lambda e: self._tag_typed(), add="+")
+        self.tag_chips = FlowFrame(card)
+        self.tag_chips.pack(fill="x", pady=(10, 0))
+        self.tag_hint = ctk.CTkLabel(card, text="Déjà utilisées :", font=theme.font(12), text_color=theme.MUTED,
+                                     anchor="w")
+        self.tag_suggestions = FlowFrame(card)
+        self._refresh_tags()
+
         # --- ingredients
         card = self._section(col, "Ingrédients", "Une ligne par ingrédient. Appuyez sur Entrée pour passer à la case suivante.")
         head = ctk.CTkFrame(card, fg_color="transparent")
@@ -345,6 +362,65 @@ class EditorView(ctk.CTkFrame):
             entry.insert(0, str(value))
         return entry
 
+    # ------------------------------------------------------------------ tags
+    def _add_tags(self, *names: str) -> None:
+        self.tags = normalize_tags([*self.tags, *names])
+        self._refresh_tags()
+
+    def _remove_tag(self, tag: str) -> None:
+        self.tags = [t for t in self.tags if fold(t) != fold(tag)]
+        self._refresh_tags()
+
+    def _commit_tag_text(self) -> None:
+        text = self.e_tag.get()
+        self.e_tag.delete(0, "end")
+        self._add_tags(*text.split(","))
+
+    def _tag_typed(self) -> None:
+        text = self.e_tag.get()
+        if "," in text:
+            done, _, rest = text.rpartition(",")
+            self.e_tag.delete(0, "end")
+            self.e_tag.insert(0, rest.lstrip())
+            self._add_tags(*done.split(","))
+        else:
+            self._refresh_suggestions()
+
+    def _refresh_tags(self) -> None:
+        chips = [ctk.CTkButton(self.tag_chips, text=f"{t}   ✕", height=32, width=0, corner_radius=16,
+                               font=theme.font(14, "bold"), fg_color=theme.ACCENT_SOFT, hover_color=theme.BORDER,
+                               text_color=theme.ACCENT_TEXT, command=lambda t=t: self._remove_tag(t))
+                 for t in self.tags]
+        self.tag_chips.set_items(chips)
+        self.e_tag.configure(state="normal" if len(self.tags) < MAX_TAGS else "disabled")
+        self._refresh_suggestions()
+
+    def _refresh_suggestions(self) -> None:
+        """Tags already used in the book (not yet on this recipe), filtered by what is being typed."""
+        typed = fold(self.e_tag.get())
+        have = {fold(t) for t in self.tags}
+        known = [t for t, _n in tag_counts(self.app.store.all()) if fold(t) not in have and typed in fold(t)]
+        known = known[:12]
+        pills = [ctk.CTkButton(self.tag_suggestions, text=t, height=30, width=0, corner_radius=15,
+                               font=theme.font(13), fg_color=theme.SURFACE, hover_color=theme.SURFACE_ALT,
+                               text_color=theme.TEXT, border_width=1, border_color=theme.BORDER_STRONG,
+                               command=lambda t=t: self._pick_suggestion(t)) for t in known]
+        if pills:
+            if not self.tag_suggestions.winfo_manager():
+                self.tag_hint.pack(anchor="w", pady=(12, 4))
+                self.tag_suggestions.pack(fill="x")
+        else:
+            self.tag_hint.pack_forget()
+            self.tag_suggestions.pack_forget()
+        self.tag_suggestions.set_items(pills)
+
+    def _pick_suggestion(self, tag: str) -> None:
+        self.e_tag.delete(0, "end")
+        self._add_tags(tag)
+
+    def _final_tags(self) -> list[str]:
+        return normalize_tags([*self.tags, *self.e_tag.get().split(",")])
+
     # ----------------------------------------------------------- ingredients
     def add_ingredient(self, ingredient: Ingredient | None = None, focus: bool = True) -> IngredientEditRow:
         row = IngredientEditRow(self.ing_list, self, ingredient)
@@ -372,7 +448,7 @@ class EditorView(ctk.CTkFrame):
         if self.recipe is None or not hasattr(self, "e_nom") or not self.e_nom.winfo_exists():
             return ()
         return (self.e_nom.get(), self.e_prep.get(), self.e_cook.get(), self.e_pour.get(), self.m_plat.get(),
-                self.m_cuisson.get(), self.fav.get(), tuple(r.state() for r in self.rows),
+                self.m_cuisson.get(), self.fav.get(), tuple(self.tags), self.e_tag.get().strip(), tuple(r.state() for r in self.rows),
                 self.t_steps.get("1.0", "end").strip(), self.t_notes.get("1.0", "end").strip())
 
     def _fail(self, message: str, widget=None) -> None:
@@ -402,6 +478,7 @@ class EditorView(ctk.CTkFrame):
         r.type_plat = self.m_plat.get() or r.type_plat
         r.type_cuisson = self.m_cuisson.get()
         r.favori = self.fav.get()
+        r.tags = self._final_tags()
         r.ingredients = [i for i in (row.value() for row in self.rows) if i]
         r.etapes = [s for s in (strip_step_number(x) for x in self.t_steps.get("1.0", "end").splitlines()) if s]
         r.notes = self.t_notes.get("1.0", "end").strip()

@@ -153,6 +153,10 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 12px; margin-bottom: 8px; scrollbar-width: thin; }
 .chip { display: inline-block; padding: 2px 12px; border-radius: 999px; background: var(--surface-alt); font-size: .95rem; font-weight: 700; white-space: nowrap; }
 .chip-btn { font: inherit; font-weight: 700; min-height: 46px; padding: 6px 18px; border: 2px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+.chip-tag { min-height: 36px; padding: 2px 14px; font-size: .9rem; }
+.chip-count { opacity: .7; font-weight: 400; }
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.tag-chips[hidden] { display: none; }
 .chip-btn.is-on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
 @media (max-width: 420px) { .grid { grid-template-columns: 1fr; } }

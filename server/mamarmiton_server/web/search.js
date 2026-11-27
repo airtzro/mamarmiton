@@ -22,15 +22,51 @@ export function formatMinutes(minutes) {
   return `${hours} h ${String(rest).padStart(2, "0")}`;
 }
 
-/** filters: {text, category}; category is "" (all), "favoris", "partagees" or a dish type. */
+export const MAX_TAGS = 20, MAX_TAG_LEN = 30;
+
+/** Same rules as models.normalize_tags: trimmed, single spaces, no duplicates (case/accents), bounded. */
+export function normalizeTags(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const tag = item.split(/\s+/).filter(Boolean).join(" ").slice(0, MAX_TAG_LEN).trim();
+    const key = fold(tag);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+
+/** Every tag of the book with its recipe count: most used first, then A to Z. */
+export function tagCounts(recipes) {
+  const counts = new Map();
+  for (const r of recipes) {
+    for (const tag of r.tags || []) {
+      const key = fold(tag);
+      const known = counts.get(key);
+      if (known) known.n += 1; else counts.set(key, { tag, n: 1 });
+    }
+  }
+  return [...counts.values()].sort((a, b) => b.n - a.n || (fold(a.tag) < fold(b.tag) ? -1 : 1));
+}
+
+/** filters: {text, category, tags}; category is "" (all), "favoris", "partagees" or a dish type. */
 export function matches(recipe, filters) {
   const cat = filters.category || "";
   if (cat === "favoris" && !recipe.favori) return false;
   if (cat === "partagees" && recipe.access === "owner") return false;
   if (DISH_TYPES.includes(cat) && recipe.type_plat !== cat) return false;
+  if (filters.tags?.length) {
+    const have = new Set((recipe.tags || []).map(fold));
+    if (!filters.tags.every((t) => have.has(fold(t)))) return false;
+  }
   const words = fold(filters.text).split(/\s+/).filter(Boolean);
   if (words.length) {
-    const haystack = [fold(recipe.nom), ...recipe.ingredients.map((i) => fold(i.nom))].join(" ");
+    const haystack = [fold(recipe.nom), ...recipe.ingredients.map((i) => fold(i.nom)), ...(recipe.tags || []).map(fold)].join(" ");
     if (!words.every((w) => haystack.includes(w))) return false;
   }
   return true;

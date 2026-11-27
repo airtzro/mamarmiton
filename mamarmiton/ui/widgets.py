@@ -338,6 +338,50 @@ class Choice(ctk.CTkFrame):
                               border_color=theme.BORDER_STRONG)
 
 
+class FlowFrame(ctk.CTkFrame):
+    """Children laid out left to right, wrapping onto new lines to fit the width."""
+
+    def __init__(self, master, gap: int = 6, **kwargs):
+        super().__init__(master, fg_color="transparent", height=1, **kwargs)
+        self.gap = gap
+        self.items: list = []
+        self._key = None
+        self.bind("<Configure>", lambda _e: self.reflow(), add="+")
+
+    def set_items(self, widgets: list) -> None:
+        for old in self.items:
+            old.grid_forget()
+        self.items = list(widgets)
+        self._key = None
+        self.reflow()
+
+    def reflow(self) -> None:
+        if not self.items:
+            return
+        scaling = ctk.ScalingTracker.get_widget_scaling(self)
+        limit = self.winfo_width()
+        if limit <= 1:  # not laid out yet: one line, the <Configure> event fixes it
+            limit = 10 ** 6
+        gap = self.gap * scaling
+        rows: list[list] = [[]]
+        used = 0.0
+        for item in self.items:
+            need = item.winfo_reqwidth() + (gap if rows[-1] else 0)
+            if rows[-1] and used + need > limit:
+                rows.append([])
+                used, need = 0.0, item.winfo_reqwidth()
+            rows[-1].append(item)
+            used += need
+        key = tuple(len(r) for r in rows)
+        if key == self._key:
+            return
+        self._key = key
+        for r, row in enumerate(rows):
+            for c, item in enumerate(row):
+                item.grid(row=r, column=c, sticky="w", padx=(0 if c == 0 else self.gap, 0),
+                          pady=(0 if r == 0 else self.gap, 0))
+
+
 class RecipeCard(ctk.CTkFrame):
     MIN_WIDTH = 250
     PHOTO_H = 160
@@ -425,8 +469,8 @@ class NavItem(ctk.CTkFrame):
     """A sidebar entry: optional icon or colour dot, label, and a count on the right."""
 
     def __init__(self, master, text: str, command: Callable[[], None], icon: str | None = None,
-                 dot: str | None = None):
-        super().__init__(master, fg_color="transparent", corner_radius=10, height=42)
+                 dot: str | None = None, height: int = 42):
+        super().__init__(master, fg_color="transparent", corner_radius=10, height=height)
         self.command = command
         self.active = False
         self.grid_columnconfigure(1, weight=1)
@@ -436,7 +480,7 @@ class NavItem(ctk.CTkFrame):
             self.icon = ctk.CTkLabel(self, text="", width=22, image=art.icon(icon, theme.SIDEBAR_MUTED, 18))
         else:
             self.icon = ctk.CTkLabel(self, text="", width=22, image=art.dot(dot or "#999999", 10))
-        self.icon.grid(row=0, column=0, padx=(14, 10), pady=10)
+        self.icon.grid(row=0, column=0, padx=(14, 10), pady=10 if height >= 40 else 6)
         self.label = ctk.CTkLabel(self, text=text, font=theme.font(14), text_color=theme.SIDEBAR_TEXT, anchor="w")
         self.label.grid(row=0, column=1, sticky="w")
         self.count = ctk.CTkLabel(self, text="", font=theme.font(12, "bold"), text_color=theme.SIDEBAR_MUTED,
