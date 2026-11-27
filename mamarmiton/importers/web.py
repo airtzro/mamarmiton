@@ -6,6 +6,7 @@ import html
 import json
 import logging
 import re
+import shutil
 import tempfile
 import urllib.error
 import urllib.parse
@@ -45,7 +46,11 @@ def normalize_url(text: str) -> str:
     if parts.scheme not in ("http", "https") or not parts.netloc or " " in url:
         raise WebImportError("Ce n'est pas une adresse de site valide. Copiez l'adresse complète de la page "
                              "(elle commence par « https:// »).")
-    return url
+    # accents typed or pasted as-is would make urllib fail with an encoding error
+    safe = "%:/?#[]@!$&'()*+,;=-._~"
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, urllib.parse.quote(parts.path, safe=safe),
+                                    urllib.parse.quote(parts.query, safe=safe),
+                                    urllib.parse.quote(parts.fragment, safe=safe)))
 
 
 def _read_limited(response, limit: int) -> bytes:
@@ -363,5 +368,6 @@ def import_url(text: str, progress: Progress | None = None) -> ImportResult:
                 images.append(path)
                 break
         if not images:
+            shutil.rmtree(folder, ignore_errors=True)  # nothing downloaded: do not leave an empty folder behind
             warnings.append("La photo de la recette n'a pas pu être récupérée.")
     return ImportResult(recipe=recipe, images=images, method="site", warnings=warnings)

@@ -409,6 +409,8 @@ class App(ctk.CTk):
         self.go_home()
 
     def focus_search(self) -> None:
+        if self.kitchen is not None:
+            return
         if self.current is not self.home:
             self.go_home()
         if self.current is self.home:
@@ -446,6 +448,11 @@ class App(ctk.CTk):
     def refresh(self, recipe: Recipe | None = None) -> None:
         if self.current is self.detail and recipe is not None and self.store.get(recipe.id):
             self.detail.show(self.store.get(recipe.id))
+        elif self.current is self.home:  # keep the scroll position (clicking a star must not jump to the top)
+            canvas = self.home.grid_area._parent_canvas
+            top = canvas.yview()[0]
+            self.go_home()
+            self.after_idle(lambda: canvas.winfo_exists() and canvas.yview_moveto(top))
         else:
             self.go_home()
 
@@ -478,9 +485,12 @@ class App(ctk.CTk):
         """A change was made: sync soon, and show the pending count."""
         self.runner.changed()
         self._update_account_area()
+        self.sidebar.update_counts(self.store.all())  # counts and tags stay right on screens that are not home
 
     # ---------------------------------------------------------------- actions
     def new_recipe(self) -> None:
+        if self.kitchen is not None:  # Ctrl+N must not open an editor hidden behind kitchen mode
+            return
         def save(recipe: Recipe) -> None:
             self.store.add(recipe)
             self._mutated()
@@ -537,7 +547,8 @@ class App(ctk.CTk):
                 return store.purge(trashed)
             store.restore(trashed)
             self._mutated()
-            self.go_home()
+            if self.current is self.home:  # never pull the user out of the editor they are typing in
+                self.go_home()
 
         def expire() -> None:
             self._toast = None
@@ -881,6 +892,8 @@ class App(ctk.CTk):
         self.after(300, self._check_conflicts)
 
     def _quit(self) -> None:
+        if not self.can_leave_editor():  # closing the window must not silently drop unsaved edits
+            return
         self.close_kitchen()
         self.finish_pending_delete()
         self.runner.stop()

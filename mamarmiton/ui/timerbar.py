@@ -127,15 +127,15 @@ class TimerBar(ctk.CTkFrame):
         timer.text.configure(text=f"{timer.label} · Terminé !", text_color=theme.ON_ACCENT)
         timer.row.configure(fg_color=theme.ACCENT)
         self.lift()
-        self._ring(RING_TIMES)
+        self._ring(timer, RING_TIMES)
         self._schedule()
 
-    def _ring(self, left: int) -> None:
-        if left <= 0:
+    def _ring(self, timer: Timer, left: int) -> None:
+        if left <= 0 or timer not in self.timers:  # dismissed: stop beeping
             return
         beep(self)
         try:
-            self.after(RING_GAP_MS, lambda: self._ring(left - 1))
+            self.after(RING_GAP_MS, lambda: self._ring(timer, left - 1))
         except Exception:
             pass
 

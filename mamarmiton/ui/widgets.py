@@ -349,8 +349,11 @@ class FlowFrame(ctk.CTkFrame):
         self.bind("<Configure>", lambda _e: self.reflow(), add="+")
 
     def set_items(self, widgets: list) -> None:
-        for old in self.items:
+        old_items = self.items
+        for old in old_items:
             old.grid_forget()
+        # destroy the replaced widgets (a button may be calling us from its own command: wait a moment)
+        self.after(200, lambda: [w.destroy() for w in old_items if w.winfo_exists()])
         self.items = list(widgets)
         self._key = None
         self.reflow()
