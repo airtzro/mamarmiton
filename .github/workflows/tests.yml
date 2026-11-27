@@ -36,6 +36,10 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             server/pyproject.toml
+      # The web JS unit tests import ES modules from plain .js files (needs node >= 22.12).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       # The server only needs the recipe model from the desktop package.
       - name: Install
         run: |
