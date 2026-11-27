@@ -15,12 +15,13 @@ from typing import TYPE_CHECKING, Callable
 
 import customtkinter as ctk
 
-from mamarmiton import __version__, config, report, usage
+from mamarmiton import __version__, config, report, updates, usage
 from mamarmiton.importers import ImportResult, import_pdf, import_url, llm, pdf_text
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES
 from mamarmiton.ui import art, theme
 from mamarmiton.ui.remote_logic import error_text, run_in_thread
 from mamarmiton.ui.widgets import Choice, Modal, ScrollFrame
+from mamarmiton.ui.update_flow import poll_thread
 
 if TYPE_CHECKING:
     from mamarmiton.ui.app import App
@@ -312,6 +313,28 @@ class HelpDialog(Modal):
         wrapped.append((note, 2 * 10 + 2 * 20 + 4))
         ctk.CTkFrame(card, fg_color="transparent", height=1, width=1).grid(row=13, column=0, pady=(0, 10))
 
+        # --- updates
+        card = theme.card(body)
+        card.pack(fill="x", padx=10, pady=(0, 16))
+        theme.heading(card, "Mises à jour", size=19).pack(anchor="w", padx=20, pady=(18, 0))
+        text = f"Vous utilisez la version {__version__}."
+        if not updates.frozen():
+            text += (" La mise à jour automatique ne concerne que l'application installée : ici, Mamarmiton "
+                     "tourne depuis le code source.")
+        label = ctk.CTkLabel(card, text=text, font=theme.font(13), text_color=theme.MUTED, anchor="w",
+                             wraplength=560, justify="left")
+        label.pack(anchor="w", padx=20, pady=(2, 12))
+        wrapped.append((label, 2 * 10 + 2 * 20 + 4))
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=(0, 20))
+        self.update_button = theme.secondary_button(row, text="Rechercher une mise à jour", width=0,
+                                                    command=self.check_for_update)
+        self.update_button.pack(side="left", padx=(0, 12))
+        self.update_status = ctk.CTkLabel(row, text="", font=theme.font(13), text_color=theme.MUTED, anchor="w",
+                                          justify="left", wraplength=300)
+        self.update_status.pack(side="left", fill="x", expand=True)
+        wrapped.append((self.update_status, 2 * 10 + 2 * 20 + 260))
+
         # --- report a problem
         card = theme.card(body)
         card.pack(fill="x", padx=10, pady=(0, 16))
@@ -354,6 +377,27 @@ class HelpDialog(Modal):
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.grid(row=2, column=0, sticky="ew", padx=28, pady=(6, 18))
         theme.primary_button(footer, text="Fermer", width=130, command=self.close).pack(side="right")
+
+    def check_for_update(self) -> None:
+        """Check now, whatever the once-a-day schedule and "Plus tard" say."""
+        self.update_button.configure(state="disabled")
+        self.update_status.configure(text="Recherche en cours…", text_color=theme.MUTED)
+
+        def done(info) -> None:
+            self.update_button.configure(state="normal")
+            if info is None:
+                self.update_status.configure(text="Vous avez la dernière version.", text_color=theme.TEXT)
+                return
+            app = self.app
+            self.close()
+            app.show_update(info, force=True)
+
+        def failed(_exc) -> None:
+            self.update_button.configure(state="normal")
+            self.update_status.configure(text="Impossible de vérifier pour l'instant. Vérifiez la connexion à "
+                                         "internet.", text_color=theme.DANGER)
+
+        poll_thread(self, lambda: updates.fetch_latest(__version__), done, failed)
 
 
 class ReportDialog(Modal):

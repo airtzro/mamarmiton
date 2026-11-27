@@ -33,6 +33,7 @@ from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, ReportDialog, UrlImp
 from mamarmiton.ui.editor import EditorView
 from mamarmiton.ui.home import HomeView
 from mamarmiton.ui.shopping import ShoppingView
+from mamarmiton.ui.update_flow import UpdateFlow, poll_thread
 from mamarmiton.ui.widgets import IconLine, NavItem, ReportButton, ScrollFrame, Toast, UpdateBanner, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
 
 log = logging.getLogger(__name__)
@@ -316,7 +317,7 @@ class App(ctk.CTk):
         if self.store.warnings:
             self.after(300, lambda: messagebox.showwarning("Attention", "\n\n".join(self.store.warnings), parent=self))
         self._update_results: queue.Queue = queue.Queue()
-        self._update_banner: UpdateBanner | None = None
+        self._update_flow: UpdateFlow | None = None
         self._upgrade_banner: UpdateBanner | None = None
         self.after(2000, self.start_update_check)
 
@@ -793,20 +794,19 @@ class App(ctk.CTk):
         if info is not None:
             self.show_update(info)
 
-    def show_update(self, info: updates.UpdateInfo) -> None:
-        if info.version == self.settings.snoozed_version:
+    def show_update(self, info: updates.UpdateInfo, force: bool = False) -> None:
+        """Offer the one-click update. ``force`` (asked from the settings) ignores "Plus tard"."""
+        if not force and info.version == self.settings.snoozed_version:
+            return
+        if self._update_flow is not None and self._update_flow.alive():
+            self._update_flow.banner.lift()
             return
 
         def later() -> None:
             self.settings.snoozed_version = info.version
             self.settings.save()
 
-        def download() -> None:
-            usage.hit("update_banner_click")
-            webbrowser.open(info.url)
-
-        self._update_banner = UpdateBanner(self, f"Une nouvelle version ({info.version}) est disponible",
-                                           download, later)
+        self._update_flow = UpdateFlow(self, info, on_later=later)
 
     def show_upgrade_required(self) -> None:
         """The server refuses this version (426): say so once, without blocking the local recipes."""
@@ -824,9 +824,22 @@ class App(ctk.CTk):
             self._upgrade_banner = None  # the sidebar keeps saying "Mise à jour nécessaire"
 
         self._upgrade_banner = UpdateBanner(self, message, open_download, forget)
-        # the update check knows the exact release page; it is silent when offline
-        rl.run_in_thread(self, lambda: updates.check_latest(__version__),
-                         lambda info: info is not None and url.__setitem__(0, info.download_url or info.url))
+
+        def found(info: updates.UpdateInfo | None) -> None:
+            """A newer release exists: offer the one-click update in the same banner."""
+            if info is None:
+                return
+            url[0] = info.url
+            if self._upgrade_banner is None or not self._upgrade_banner.winfo_exists():
+                return
+            self._upgrade_banner.destroy()
+            if self._update_flow is not None and self._update_flow.alive():
+                self._update_flow.banner.destroy()
+            self._update_flow = UpdateFlow(self, info, message=message, on_later=forget)
+            self._upgrade_banner = self._update_flow.banner
+
+        # the update check knows the exact release; it is silent when offline
+        poll_thread(self, lambda: updates.check_latest(__version__), found)
 
     # ---------------------------------------------------------- account & sync
     def local_book(self) -> RecipeStore:
@@ -987,6 +1000,10 @@ class App(ctk.CTk):
     def _quit(self) -> None:
         if not self.can_leave_editor():  # closing the window must not silently drop unsaved edits
             return
+        self.shutdown()
+
+    def shutdown(self) -> None:
+        """Close for good without asking: finish pending work, save, then destroy the window."""
         self.close_kitchen()
         self.finish_pending_delete()
         self.runner.stop()
@@ -1004,6 +1021,8 @@ def main() -> None:
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
     config.setup_logging()
     log.info("%s %s starting, data in %s", APP_NAME, __version__, config.data_dir())
+    updates.wait_for_previous()  # after an update: let the old instance finish saving first
+    updates.cleanup_old_in_background()
     try:
         app = App()
     except Exception:
