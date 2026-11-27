@@ -26,6 +26,9 @@ def process(data: bytes) -> tuple[bytes, str, str]:
         with Image.open(io.BytesIO(data)) as probe:
             if probe.format not in ALLOWED_FORMATS:
                 raise BadImage("Format d'image non pris en charge.")
+            if probe.width * probe.height > Image.MAX_IMAGE_PIXELS:
+                # Pillow only warns between 1x and 2x the limit; refuse before decoding anything
+                raise BadImage("Image trop grande.")
             probe.verify()  # structural check; the image must be reopened afterwards
         with Image.open(io.BytesIO(data)) as img:
             img.seek(0)  # first frame of an animated GIF
