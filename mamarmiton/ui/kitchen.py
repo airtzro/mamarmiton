@@ -54,7 +54,7 @@ class KitchenView(ctk.CTkFrame):
         self.show_ingredients = False
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)  # rows: top, progress, step, "ensuite", buttons
 
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=28, pady=(20, 6))
@@ -69,8 +69,20 @@ class KitchenView(ctk.CTkFrame):
         self.title = ctk.CTkLabel(top, text=recipe.nom, font=theme.font(15), text_color=theme.MUTED, anchor="w")
         self.title.pack(side="left", fill="x", expand=True, padx=(18, 12))
 
+        # one segment per step: where you are in the recipe, readable from across the kitchen
+        self.segments = []
+        if len(self.steps) > 1:
+            bar = ctk.CTkFrame(self, fg_color="transparent")
+            bar.grid(row=1, column=0, columnspan=2, sticky="ew", padx=28, pady=(4, 4))
+            for i in range(len(self.steps)):
+                bar.grid_columnconfigure(i, weight=1, uniform="seg")
+                seg = ctk.CTkFrame(bar, height=7, corner_radius=4, fg_color=theme.BORDER)
+                seg.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 6, 0))
+                self.segments.append(seg)
+            self.progress_bar = bar
+
         self.stage = ScrollFrame(self)
-        self.stage.grid(row=1, column=0, sticky="nsew", padx=(28, 12), pady=8)
+        self.stage.grid(row=2, column=0, sticky="nsew", padx=(28, 12), pady=8)
         self.stage.grid_columnconfigure(0, weight=1)
         self.text = ctk.CTkLabel(self.stage, text="", font=theme.font(36), text_color=theme.TEXT, justify="left",
                                  anchor="nw", wraplength=600)
@@ -78,11 +90,20 @@ class KitchenView(ctk.CTkFrame):
         self.timer_row = ctk.CTkFrame(self.stage, fg_color="transparent")
         self.timer_row.grid(row=1, column=0, sticky="w")
 
+        # "Ensuite": the next step, small, so you can get the next thing ready
+        self.next_box = ctk.CTkFrame(self, fg_color="transparent")
+        self.next_head = ctk.CTkLabel(self.next_box, text="Ensuite", font=theme.font(15, "bold"),
+                                      text_color=theme.ACCENT_TEXT, anchor="w", height=20)
+        self.next_head.pack(anchor="w")
+        self.next_text = ctk.CTkLabel(self.next_box, text="", font=theme.font(17), text_color=theme.MUTED,
+                                      anchor="w", justify="left", wraplength=600)
+        self.next_text.pack(anchor="w", fill="x")
+
         self.panel = theme.card(self, width=self.PANEL_W)
         self._fill_panel()
 
         nav = ctk.CTkFrame(self, fg_color="transparent")
-        nav.grid(row=2, column=0, columnspan=2, sticky="ew", padx=28, pady=(8, 24))
+        nav.grid(row=4, column=0, columnspan=2, sticky="ew", padx=28, pady=(14, 24))
         nav.grid_columnconfigure((0, 1), weight=1, uniform="nav")
         big = dict(height=78, font=theme.font(24, "bold"), corner_radius=18, compound="left")
         self.btn_prev = theme.secondary_button(nav, text=" Précédent", image=art.icon("back", theme.TEXT, 24),
@@ -114,7 +135,7 @@ class KitchenView(ctk.CTkFrame):
     def toggle_ingredients(self) -> None:
         self.show_ingredients = not self.show_ingredients
         if self.show_ingredients:
-            self.panel.grid(row=1, column=1, sticky="ns", padx=(0, 28), pady=8)
+            self.panel.grid(row=2, column=1, sticky="ns", padx=(0, 28), pady=8)
         else:
             self.panel.grid_forget()
         self.btn_ing.configure(fg_color=theme.ACCENT_SOFT if self.show_ingredients else theme.SURFACE)
@@ -157,6 +178,14 @@ class KitchenView(ctk.CTkFrame):
         self.btn_prev.configure(state="normal" if self.index > 0 else "disabled")
         last = self.index == n - 1
         self.btn_next.configure(text="Terminer " if last else "Suivant ")
+        for i, seg in enumerate(self.segments):
+            seg.configure(fg_color=theme.ACCENT if i == self.index else theme.ACCENT_SOFT if i < self.index else theme.BORDER)
+        if last:
+            self.next_box.grid_forget()
+        else:
+            nxt = self.steps[self.index + 1]
+            self.next_text.configure(text=nxt if len(nxt) <= 160 else nxt[:159].rsplit(" ", 1)[0] + "…")
+            self.next_box.grid(row=3, column=0, columnspan=2, sticky="ew", padx=28, pady=(6, 0))
         for child in self.timer_row.winfo_children():
             child.destroy()
         for duration in find_durations(text):
@@ -174,6 +203,7 @@ class KitchenView(ctk.CTkFrame):
         if self.show_ingredients:
             width -= self.PANEL_W + 28
         try:
+            self.next_text.configure(wraplength=max(240, int(self.winfo_width() / scaling) - 80))
             self.text.configure(wraplength=max(240, width))
         except Exception:
             pass

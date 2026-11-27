@@ -44,6 +44,8 @@ PLURALS = {"Entrée": "Entrées", "Plat": "Plats", "Dessert": "Desserts", "Pain"
 
 class Sidebar(ctk.CTkFrame):
     WIDTH = 264
+    NARROW_WIDTH = 220  # small windows: the recipes need the room more than the sidebar
+    NARROW_BELOW = 1000  # window width, in unscaled pixels
     TAGS_SHOWN = 6
 
     def __init__(self, master, app: "App"):
@@ -60,8 +62,10 @@ class Sidebar(ctk.CTkFrame):
         words.pack(side="left", padx=(12, 0))
         ctk.CTkLabel(words, text="Mamarmiton", font=theme.serif(21), text_color=theme.SIDEBAR_TEXT,
                      anchor="w", height=24).pack(anchor="w")
-        ctk.CTkLabel(words, text="Les recettes de la famille", font=theme.font(12), text_color=theme.SIDEBAR_MUTED,
-                     anchor="w", height=18).pack(anchor="w")
+        self.tagline = ctk.CTkLabel(words, text="Les recettes de la famille", font=theme.font(12),
+                                    text_color=theme.SIDEBAR_MUTED, anchor="w", height=18)
+        self.tagline.pack(anchor="w")
+        self.narrow = False
 
         # packed before the categories so a short window crops them, never the buttons and account area
         bottom = ctk.CTkFrame(self, fg_color="transparent")
@@ -75,7 +79,7 @@ class Sidebar(ctk.CTkFrame):
         self.tags_expanded = False
         self._tags_signature = None
 
-        ctk.CTkLabel(self, text="CATÉGORIES", font=theme.font(11, "bold"), text_color=theme.SIDEBAR_MUTED,
+        ctk.CTkLabel(self, text="Catégories", font=theme.font(13, "bold"), text_color=theme.SIDEBAR_MUTED,
                      anchor="w").pack(fill="x", padx=26, pady=(22, 4))
         for dish in DISH_TYPES:
             self._nav(dish, PLURALS.get(dish, dish), dot=theme.dish(dish)["dot"])
@@ -87,11 +91,12 @@ class Sidebar(ctk.CTkFrame):
                       height=44, corner_radius=theme.RADIUS, fg_color="transparent", hover_color=theme.SIDEBAR_HOVER,
                       border_width=1, border_color=theme.SIDEBAR_LINE, text_color=theme.SIDEBAR_TEXT,
                       font=theme.font(14, "bold"), command=app.import_pdf).pack(fill="x", pady=(8, 0))
-        ctk.CTkButton(bottom, text="Importer depuis un site", image=art.icon("globe", theme.SIDEBAR_TEXT, 18),
-                      compound="left", height=44, corner_radius=theme.RADIUS, fg_color="transparent",
-                      hover_color=theme.SIDEBAR_HOVER, border_width=1, border_color=theme.SIDEBAR_LINE,
-                      text_color=theme.SIDEBAR_TEXT, font=theme.font(14, "bold"),
-                      command=app.import_url).pack(fill="x", pady=(8, 14))
+        self.btn_import_url = ctk.CTkButton(
+            bottom, text="Importer depuis un site", image=art.icon("globe", theme.SIDEBAR_TEXT, 18),
+            compound="left", height=44, corner_radius=theme.RADIUS, fg_color="transparent",
+            hover_color=theme.SIDEBAR_HOVER, border_width=1, border_color=theme.SIDEBAR_LINE,
+            text_color=theme.SIDEBAR_TEXT, font=theme.font(14, "bold"), command=app.import_url)
+        self.btn_import_url.pack(fill="x", pady=(8, 14))
         ctk.CTkFrame(bottom, height=1, fg_color=theme.SIDEBAR_LINE, corner_radius=0).pack(fill="x", pady=(0, 8))
         help_row = self._help_row = ctk.CTkFrame(bottom, fg_color="transparent")
         help_row.pack(fill="x")
@@ -104,6 +109,18 @@ class Sidebar(ctk.CTkFrame):
         self._build_account_area(bottom)
 
         self._highlight()
+
+    def set_narrow(self, narrow: bool) -> None:
+        if narrow == self.narrow:
+            return
+        self.narrow = narrow
+        self.configure(width=self.NARROW_WIDTH if narrow else self.WIDTH)
+        if narrow:
+            self.tagline.pack_forget()
+        else:
+            self.tagline.pack(anchor="w")
+        self.btn_import_url.configure(text="Importer d'un site" if narrow else "Importer depuis un site")
+        self.items[None].label.configure(text="Toutes" if narrow else "Toutes les recettes")
 
     def _build_account_area(self, parent) -> None:
         app = self.app
@@ -207,7 +224,7 @@ class Sidebar(ctk.CTkFrame):
             return
         if not self.tag_box.winfo_ismapped():
             self.tag_box.pack(fill="x")
-        ctk.CTkLabel(self.tag_box, text="ÉTIQUETTES", font=theme.font(11, "bold"), text_color=theme.SIDEBAR_MUTED,
+        ctk.CTkLabel(self.tag_box, text="Étiquettes", font=theme.font(13, "bold"), text_color=theme.SIDEBAR_MUTED,
                      anchor="w").pack(fill="x", padx=26, pady=(18, 4))
         many = len(counts) > self.TAGS_SHOWN
         shown = counts if self.tags_expanded else counts[:self.TAGS_SHOWN]
@@ -283,6 +300,7 @@ class App(ctk.CTk):
         self.kitchen: KitchenView | None = None
         self.report_button = ReportButton(self, self.report_problem, content_left=Sidebar.WIDTH)
         self.report_button.show()
+        self.bind("<Configure>", self._on_window_resize, add="+")
         self._before_editor: Recipe | None = None  # recipe to return to when the editor closes
 
         self.bind_all("<Control-n>", lambda _e: self.new_recipe())
@@ -300,6 +318,13 @@ class App(ctk.CTk):
         self._update_banner: UpdateBanner | None = None
         self._upgrade_banner: UpdateBanner | None = None
         self.after(2000, self.start_update_check)
+
+    def _on_window_resize(self, event) -> None:
+        if event.widget is not self:
+            return
+        scaling = ctk.ScalingTracker.get_widget_scaling(self)
+        self.sidebar.set_narrow(event.width / scaling < Sidebar.NARROW_BELOW)
+        self.report_button.set_content_left(Sidebar.NARROW_WIDTH if self.sidebar.narrow else Sidebar.WIDTH)
 
     # ------------------------------------------------------------ navigation
     def _switch(self, view: ctk.CTkFrame) -> None:
@@ -453,6 +478,7 @@ class App(ctk.CTk):
         self.kitchen.destroy()
         self.kitchen = None
         self.report_button.show()
+        self.bind("<Configure>", self._on_window_resize, add="+")
         self.timers.dock(False)
         keep_awake(False)
 

@@ -4,6 +4,7 @@ numbered steps you can tick off while cooking, notes and photos."""
 from __future__ import annotations
 
 import json
+import tkinter as tk
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
@@ -130,8 +131,10 @@ class DetailView(ctk.CTkFrame):
         self.btn_variant = theme.secondary_button(bar, text="Créer une variante", width=0, compound="left",
                                                   image=art.icon("copy", theme.TEXT, 17),
                                                   command=lambda: app.duplicate_recipe(self.recipe))
-        self.btn_edit = theme.primary_button(bar, text="Modifier", image=art.icon("pencil", theme.ON_ACCENT, 17),
-                                             compound="left", width=0, command=lambda: app.edit_recipe(self.recipe))
+        self.btn_edit = theme.secondary_button(bar, text="Modifier", image=art.icon("pencil", theme.TEXT, 17),
+                                               compound="left", width=0, command=lambda: app.edit_recipe(self.recipe))
+        self.btn_more = theme.secondary_button(bar, text="Plus", image=art.icon("more", theme.TEXT, 17),
+                                               compound="left", width=0, command=self._open_more)
         self.btn_share = theme.secondary_button(bar, text="Partager", image=art.icon("share", theme.TEXT, 17),
                                                 compound="left", width=0,
                                                 command=lambda: app.share_recipe(self.recipe))
@@ -181,28 +184,59 @@ class DetailView(ctk.CTkFrame):
             self.body._parent_canvas.yview_moveto(0)
 
     def _update_toolbar(self) -> None:
-        """Show only the buttons this recipe's permissions allow."""
+        """Favourite and "Modifier" stay in sight; printing, variants, sharing and deleting wait behind "Plus"."""
         r, app = self.recipe, self.app
         if r is None:
             return
-        for button in (self.btn_delete, self.btn_variant, self.btn_edit, self.btn_share, self.btn_print, self.btn_fav):
+        for button in (self.btn_delete, self.btn_variant, self.btn_edit, self.btn_share, self.btn_print, self.btn_fav,
+                       self.btn_more):
             button.pack_forget()
-        can_delete, can_edit = app.can_delete(r), app.can_edit(r)
-        if can_delete:
-            self.btn_delete.pack(side="right", padx=(8, 10))
-        if can_edit:
-            self.btn_edit.pack(side="right", padx=(8, 0 if can_delete else 10))
-        self.btn_variant.pack(side="right", padx=(8, 0 if (can_edit or can_delete) else 10))
-        self.btn_print.pack(side="right", padx=(8, 0))
+        self.btn_more.pack(side="right", padx=(8, 10))
+        if app.can_edit(r):
+            self.btn_edit.pack(side="right", padx=(8, 0))
+        self.btn_fav.pack(side="right", padx=(0, 0))
+
+    def more_actions(self) -> list[tuple[str, object]]:
+        """The entries of the "Plus" menu for this recipe: (label, command); None is a separator."""
+        r, app = self.recipe, self.app
+        if r is None:
+            return []
+        items: list = [("Imprimer / PDF", lambda: app.print_recipe(r)),
+                       ("Créer une variante", lambda: app.duplicate_recipe(r))]
         if app.is_remote and app.is_owner(r):
-            self.btn_share.pack(side="right", padx=(8, 0))
-        self.btn_fav.pack(side="right", padx=(0, 0 if (can_edit or can_delete) else 10))
+            items.append(("Partager", lambda: app.share_recipe(r)))
+        if app.can_edit(r):
+            items.append(("Ajouter une photo", lambda: app.add_photo(r)))
+        if app.can_delete(r):
+            items += [None, ("Supprimer", lambda: app.delete_recipe(r))]
+        return items
+
+    def _open_more(self) -> None:
+        dark = ctk.get_appearance_mode() == "Dark"
+        pick = lambda pair: pair[1] if dark else pair[0]  # noqa: E731
+        menu = tk.Menu(self, tearoff=0, font=theme.font(15), bg=pick(theme.SURFACE), fg=pick(theme.TEXT),
+                       activebackground=pick(theme.ACCENT_SOFT), activeforeground=pick(theme.TEXT),
+                       relief="flat", borderwidth=1)
+        for item in self.more_actions():
+            if item is None:
+                menu.add_separator()
+                continue
+            label, command = item
+            danger = label == "Supprimer"
+            menu.add_command(label=f"  {label}  ", command=command,
+                             foreground=pick(theme.DANGER) if danger else None)
+        b = self.btn_more
+        try:
+            menu.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height() + 4)
+        finally:
+            menu.grab_release()
 
     def _update_fav_button(self) -> None:
         fav = bool(self.recipe and self.recipe.favori)
         label = "Dans mes favoris" if fav else "Ajouter aux favoris"
-        self.btn_fav.configure(text="" if self._compact else label,
+        self.btn_fav.configure(text="", width=42, fg_color=theme.NOTE_BG if fav else theme.SURFACE,
                                image=art.icon("star" if fav else "star_outline", theme.STAR if fav else theme.TEXT, 18))
+        self._fav_label = label  # icon-only: the star is understood everywhere, and never gets clipped
 
     # ----------------------------------------------------------------- hero
     def _build_hero(self, r: Recipe) -> None:
@@ -224,9 +258,6 @@ class DetailView(ctk.CTkFrame):
             side="left", padx=(0, 6))
         theme.chip(tags, f"  {r.type_cuisson}", image=art.icon("pot", theme.MUTED, 14), compound="left").pack(
             side="left", padx=(0, 6))
-        if r.favori:
-            theme.chip(tags, "  Favori", fg=theme.NOTE_BG, image=art.icon("star", theme.STAR, 14),
-                       compound="left").pack(side="left", padx=(0, 6))
         if not self.app.can_edit(r):  # on its own line: the tag row cannot wrap
             theme.chip(info, "  Lecture seule", fg=theme.ACCENT_SOFT, text_color=theme.ACCENT_TEXT,
                        image=art.icon("eye", theme.ACCENT_TEXT, 14), compound="left").pack(anchor="w", pady=(8, 0))
@@ -252,20 +283,26 @@ class DetailView(ctk.CTkFrame):
                          text_color=theme.MUTED, anchor="w").pack(anchor="w", pady=(6, 0))
 
         stats = ctk.CTkFrame(info, fg_color="transparent")
-        stats.pack(anchor="w", fill="x", pady=(22, 0))
+        stats.pack(anchor="w", fill="x", pady=(20, 0))
         self.tiles = []
-        facts = [("clock", "Préparation", format_minutes(r.temps) if r.temps else "—"),
-                 ("pot", "Cuisson", format_minutes(r.temps_cuisson) if r.temps_cuisson else "—"),
-                 ("clock", "Total", format_minutes(r.temps_total) if r.temps_total else "—"),
-                 ("users", "Pour", f"{r.pour} pers.")]
-        for i, (icon, label, value) in enumerate(facts):
-            tile = theme.card(stats, corner_radius=16)
+        facts = []
+        if r.temps:
+            facts.append(("Préparation", format_minutes(r.temps)))
+        if r.temps_cuisson:
+            facts.append(("Cuisson", format_minutes(r.temps_cuisson)))
+        if r.temps and r.temps_cuisson:
+            facts.append(("Total", format_minutes(r.temps_total)))
+        facts.append(("Pour", f"{r.pour} pers."))
+        for label, value in facts:
+            tile = ctk.CTkFrame(stats, fg_color="transparent")
             self.tiles.append(tile)
-            ctk.CTkLabel(tile, text=f"  {label.upper()}", image=art.icon(icon, theme.MUTED, 14), compound="left",
-                         font=theme.font(11, "bold"), text_color=theme.MUTED, anchor="w").pack(
-                anchor="w", padx=16, pady=(14, 0))
-            ctk.CTkLabel(tile, text=value, font=theme.serif(21), text_color=theme.TEXT, anchor="w").pack(
-                anchor="w", padx=16, pady=(2, 14))
+            ctk.CTkLabel(tile, text=label, font=theme.font(13), text_color=theme.MUTED, anchor="w", height=18).pack(
+                anchor="w")
+            ctk.CTkLabel(tile, text=value, font=theme.serif(24), text_color=theme.TEXT, anchor="w").pack(anchor="w")
+        if r.etapes:
+            theme.primary_button(info, text="Commencer à cuisiner", image=art.icon("pot", theme.ON_ACCENT, 20),
+                                 compound="left", height=52, width=0, font=theme.font(16, "bold"),
+                                 command=lambda: self.app.open_kitchen(r, self.servings)).pack(anchor="w", pady=(22, 0))
 
     # ---------------------------------------------------------- ingredients
     def _build_ingredients(self, r: Recipe) -> None:
@@ -366,10 +403,7 @@ class DetailView(ctk.CTkFrame):
         if r.etapes:
             ctk.CTkLabel(head, text=f"{len(r.etapes)} étape{'s' if len(r.etapes) > 1 else ''}",
                          font=theme.font(13), text_color=theme.MUTED).pack(side="left", padx=(12, 0), pady=(6, 0))
-            theme.secondary_button(head, text="Mode cuisine", width=0, height=36, compound="left",
-                                   image=art.icon("pot", theme.TEXT, 17),
-                                   command=lambda: self.app.open_kitchen(r, self.servings)).pack(side="right")
-            ctk.CTkLabel(box, text="Astuce : cliquez sur une étape quand elle est faite.", font=theme.font(12),
+            ctk.CTkLabel(box, text="Cliquez sur une étape pour la cocher quand elle est faite.", font=theme.font(12),
                          text_color=theme.FAINT, anchor="w").pack(anchor="w", padx=22, pady=(0, 6))
 
         if not r.etapes:
@@ -449,10 +483,7 @@ class DetailView(ctk.CTkFrame):
         if compact == self._compact:
             return
         self._compact = compact
-        self.btn_delete.configure(text="" if compact else "Supprimer")
-        self.btn_share.configure(text="" if compact else "Partager")
-        self.btn_variant.configure(text="" if compact else "Créer une variante")
-        self.btn_print.configure(text="" if compact else "Imprimer / PDF")
+        self.btn_more.configure(text="" if compact else "Plus", width=42 if compact else 0)
         self._update_fav_button()
 
     def _apply_layout(self, wide: bool, two_cols: bool, stacked: bool, width: int) -> None:
@@ -463,7 +494,10 @@ class DetailView(ctk.CTkFrame):
             return
         self._mode = mode
         r = self.recipe
-        if stacked:
+        if self._cover_photo is None:  # no photo: the title is the hero, no placeholder picture
+            self.cover_label.grid_forget()
+            self.hero_info.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=0, pady=0)
+        elif stacked:
             size = (max(240, banner_w - 10), 220)
             self.cover_label.grid(row=0, column=0, columnspan=2, sticky="nw")
             self.hero_info.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=0, pady=(16, 0))
@@ -471,16 +505,16 @@ class DetailView(ctk.CTkFrame):
             size = COVER if wide else COVER_SMALL
             self.cover_label.grid(row=0, column=0, columnspan=1, sticky="nw")
             self.hero_info.grid(row=0, column=1, columnspan=1, sticky="nsew", padx=(32, 0), pady=0)
-        self.cover_label.configure(image=art.cover(self._cover_photo, r.id, r.type_plat, r.nom, size, radius=20,
-                                                   bg=theme.BG, tag=False))
+        if self._cover_photo is not None:
+            self.cover_label.configure(image=art.cover(self._cover_photo, r.id, r.type_plat, r.nom, size, radius=20,
+                                                       bg=theme.BG, tag=False))
         stats = self.tiles[0].master
-        per_row = 4 if (wide or (stacked and width >= 560)) else 2
-        for c in range(4):
-            stats.grid_columnconfigure(c, weight=1 if c < per_row else 0, uniform="stat" if c < per_row else "")
+        info_w = width if (stacked or self._cover_photo is None) else width - (COVER if wide else COVER_SMALL)[0] - 32
+        per_row = 4 if info_w >= 125 * len(self.tiles) else 2
         for i, tile in enumerate(self.tiles):
             col = i % per_row
-            tile.grid(row=i // per_row, column=col, sticky="nsew", padx=(0 if col == 0 else 10, 0),
-                      pady=(0 if i < per_row else 10, 0))
+            tile.grid(row=i // per_row, column=col, sticky="nw", padx=(0 if col == 0 else 28, 0),
+                      pady=(0 if i < per_row else 12, 0))
         if two_cols:
             self.body.grid_columnconfigure(0, weight=2, uniform="col")
             self.body.grid_columnconfigure(1, weight=3, uniform="col")

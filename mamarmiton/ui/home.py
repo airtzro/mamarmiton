@@ -16,7 +16,7 @@ from mamarmiton.ui.widgets import FlowFrame, RecipeCard, ScrollFrame
 if TYPE_CHECKING:
     from mamarmiton.ui.app import App
 
-GAP = 20
+GAP = 14
 PAD = 36  # left/right margin of the page
 
 ALL_COOKING = "Toutes cuissons"
@@ -107,7 +107,8 @@ class HomeView(ctk.CTkFrame):
         # --- greeting + title
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=PAD, pady=(30, 16))
-        self.eyebrow = theme.eyebrow(header, "")
+        # "Bonsoir," leads into the question: one sentence over two lines
+        self.eyebrow = ctk.CTkLabel(header, text="", font=theme.serif(20), text_color=theme.MUTED, anchor="w")
         self.eyebrow.pack(anchor="w")
         title_row = ctk.CTkFrame(header, fg_color="transparent")
         title_row.pack(fill="x", pady=(2, 0))
@@ -223,13 +224,16 @@ class HomeView(ctk.CTkFrame):
         for child in self.grid_area.winfo_children():
             child.destroy()
         self._cards = []
+        self._empty_labels = []
         self._layout_key = None
 
         if category is None:
-            self.eyebrow.configure(text=f"{greeting()} !".upper())
-            self.title.configure(text="Qu'est-ce qu'on cuisine ?")
+            name = (self.app.account.display_name or self.app.account.username) if self.app.account else ""
+            self.eyebrow.configure(text=f"{greeting()}{f' {name}' if name else ''},")
+            self.eyebrow.pack(anchor="w", before=self.title.master)
+            self.title.configure(text="qu'est-ce qu'on cuisine ?")
         else:
-            self.eyebrow.configure(text="VOTRE CARNET")
+            self.eyebrow.pack_forget()
             self.title.configure(text=title)
         n = len(recipes)
         self.count.configure(text=f"{n} recette{'s' if n > 1 else ''}" if total else "")
@@ -320,6 +324,10 @@ class HomeView(ctk.CTkFrame):
 
     def _on_resize(self, _event=None) -> None:
         self._arrange_bar()
+        wrap = max(220, min(520, self._available_width() - 80))
+        for label in getattr(self, "_empty_labels", []):
+            if label.winfo_exists():
+                label.configure(wraplength=wrap)
         if self._resize_job:
             self.after_cancel(self._resize_job)
         self._resize_job = self.after(120, self._layout)
@@ -343,35 +351,40 @@ class HomeView(ctk.CTkFrame):
         for c in range(8):
             self.grid_area.grid_columnconfigure(c, weight=0, uniform="")
         self.grid_area.grid_columnconfigure(0, weight=1)
+        wrap = max(220, min(520, self._available_width() - 80))  # text wraps inside the card at any width
         box = theme.card(self.grid_area, fg_color=theme.SURFACE)
         box.grid(row=0, column=0, sticky="ew", padx=(6, 12), pady=(10, 0))
         inner = ctk.CTkFrame(box, fg_color="transparent")
-        inner.pack(pady=56, padx=40)
+        inner.pack(pady=48, padx=28)
         ctk.CTkLabel(inner, text="", image=art.logo(64)).pack(pady=(0, 18))
-        row = ctk.CTkFrame(inner, fg_color="transparent")
+
+        def say(title: str, text: str) -> None:
+            head = theme.heading(inner, title, size=26, wraplength=wrap, justify="center", anchor="center")
+            head.pack()
+            body = ctk.CTkLabel(inner, text=text, font=theme.font(15), text_color=theme.MUTED, wraplength=wrap,
+                                justify="center")
+            body.pack(pady=(8, 22))
+            self._empty_labels = [head, body]
+
+        # the actions are stacked: they stay whole in a narrow window and read as a list of choices
+        button = dict(compound="left", width=min(280, wrap), height=46)
         if total == 0:
-            theme.heading(inner, "Votre carnet est encore vide", size=26).pack()
-            ctk.CTkLabel(inner, text="Ajoutez votre première recette, en l'écrivant, depuis un PDF ou depuis un site.",
-                         font=theme.font(15), text_color=theme.MUTED).pack(pady=(8, 22))
-            row.pack()
-            theme.primary_button(row, text="Écrire une recette", image=art.icon("pencil", theme.ON_ACCENT, 17),
-                                 compound="left", width=200, command=self.app.new_recipe).pack(side="left", padx=6)
-            theme.secondary_button(row, text="Importer un PDF", image=art.icon("pdf", theme.TEXT, 17),
-                                   compound="left", width=190, command=self.app.import_pdf).pack(side="left", padx=6)
-            theme.secondary_button(row, text="Importer depuis un site", image=art.icon("globe", theme.TEXT, 17),
-                                   compound="left", width=230, command=self.app.import_url).pack(side="left", padx=6)
+            say("Votre carnet est encore vide",
+                "Ajoutez votre première recette : écrivez-la, ou importez-la depuis un PDF ou un site.")
+            theme.primary_button(inner, text="Écrire une recette", image=art.icon("pencil", theme.ON_ACCENT, 17),
+                                 command=self.app.new_recipe, **button).pack()
+            theme.secondary_button(inner, text="Importer un PDF", image=art.icon("pdf", theme.TEXT, 17),
+                                   command=self.app.import_pdf, **button).pack(pady=(10, 0))
+            theme.secondary_button(inner, text="Importer depuis un site", image=art.icon("globe", theme.TEXT, 17),
+                                   command=self.app.import_url, **button).pack(pady=(10, 0))
         elif filtered:
-            theme.heading(inner, "Aucune recette ne correspond", size=26).pack()
-            ctk.CTkLabel(inner, text="Essayez un autre mot, ou enlevez un filtre.",
-                         font=theme.font(15), text_color=theme.MUTED).pack(pady=(8, 22))
+            say("Aucune recette ne correspond", "Essayez un autre mot, ou enlevez un filtre.")
             theme.secondary_button(inner, text="Effacer les filtres", image=art.icon("reset", theme.TEXT, 16),
-                                   compound="left", width=200, command=self.app.reset_filters).pack()
+                                   command=self.app.reset_filters, **button).pack()
         else:
-            theme.heading(inner, "Rien ici pour l'instant", size=26).pack()
             what = "favori" if category and category.startswith("__") else "recette dans cette catégorie"
             hint = ("Cliquez sur l'étoile d'une recette pour la retrouver ici." if what == "favori"
                     else "Ajoutez-en une, elle apparaîtra ici.")
-            ctk.CTkLabel(inner, text=f"Pas encore de {what}. {hint}", font=theme.font(15),
-                         text_color=theme.MUTED).pack(pady=(8, 22))
+            say("Rien ici pour l'instant", f"Pas encore de {what}. {hint}")
             theme.primary_button(inner, text="Nouvelle recette", image=art.icon("plus", theme.ON_ACCENT, 17),
-                                 compound="left", width=200, command=self.app.new_recipe).pack()
+                                 command=self.app.new_recipe, **button).pack()

@@ -230,8 +230,8 @@ def card(master, **kwargs) -> ctk.CTkFrame:
 
 
 def eyebrow(master, text: str, **kwargs) -> ctk.CTkLabel:
-    """Small uppercase label above a title or a field."""
-    opts = dict(text=text.upper(), font=font(11, "bold"), text_color=MUTED, anchor="w")
+    """Small label above a field or a group (sentence case: easier to read than capitals)."""
+    opts = dict(text=text, font=font(13, "bold"), text_color=MUTED, anchor="w")
     opts.update(kwargs)
     return ctk.CTkLabel(master, **opts)
 

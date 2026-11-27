@@ -143,7 +143,7 @@ def test_flowframe_does_not_leak_replaced_chips(app):
     flow = app.home.tag_flow
     time.sleep(0.4)
     _pump(app, 10)
-    assert len(flow.winfo_children()) == len(flow.items) <= 1
+    assert len(flow.chips()) == len(flow.items) <= 1
 
 
 def test_editor_suggestions_do_not_leak(app):
@@ -156,7 +156,7 @@ def test_editor_suggestions_do_not_leak(app):
     time.sleep(0.4)
     _pump(app, 10)
     flow = app.editor.tag_suggestions
-    assert len(flow.winfo_children()) == len(flow.items)
+    assert len(flow.chips()) == len(flow.items)
 
 
 def test_url_import_closed_mid_fetch_cleans_up_and_stays_quiet(app, monkeypatch, tmp_path):

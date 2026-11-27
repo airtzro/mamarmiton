@@ -204,6 +204,10 @@ def _draw_icon(name: str, color: str) -> Image.Image:
     elif name == "close":
         _stroke(d, pts((6, 6), (18, 18)), w, c)
         _stroke(d, pts((18, 6), (6, 18)), w, c)
+    elif name == "more":  # three dots in a row
+        for x in (5, 12, 19):
+            r = 1.9 * s
+            d.ellipse((x * s - r, 12 * s - r, x * s + r, 12 * s + r), fill=c)
     else:
         raise ValueError(f"unknown icon {name!r}")
     return img
