@@ -9,14 +9,15 @@
 
 import sys
 
-from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules
 
 WINDOWS = sys.platform.startswith("win")
 
 datas = [("assets/icon.ico", "assets"), ("assets/fonts", "assets/fonts")]
 binaries = []
-# Pillow finds Tk through this module at run time; PyInstaller cannot see that import
-hiddenimports = ["PIL._tkinter_finder", "PIL.ImageTk"]
+# Pillow finds Tk through this module at run time; PyInstaller cannot see that import.
+# mamarmiton.importers loads its modules lazily (import_module), invisible to the analysis too.
+hiddenimports = ["PIL._tkinter_finder", "PIL.ImageTk"] + collect_submodules("mamarmiton")
 
 # customtkinter ships theme JSON files that must be bundled
 ctk_datas, ctk_binaries, ctk_hidden = collect_all("customtkinter")
