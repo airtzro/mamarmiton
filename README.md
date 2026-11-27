@@ -97,12 +97,22 @@ pyinstaller recette.spec
 
 The result is `dist/recette.exe`, a single file with no console window. Ship the `model/` folder next to it if you want AI import.
 
+## Building the Linux executable
+
+```sh
+packaging/linux/build.sh      # -> dist/mamarmiton, one self-contained file (x86_64)
+packaging/linux/install.sh    # -> ~/.local/bin/mamarmiton + icon + app-launcher entry
+packaging/linux/install.sh --uninstall
+```
+
+Build with the distribution's Python and Tk (`python3-tk` on Debian/Ubuntu, `tk` on Arch): uv and python.org builds ship a Tk without Xft, and the script refuses them. The binary runs on distributions with a glibc at least as new as the build machine's. Recipes live in `~/.local/share/recette_app`, so reinstalling or uninstalling never touches them. AI import needs `llama-cpp-python` in the build environment and the `model/` folder in `~/.local/share/recette_app/model`.
+
 ## Publishing a release
 
 1. Bump the version in `pyproject.toml` and `mamarmiton/__init__.py`, commit.
 2. `git tag v4.1.0 && git push --tags`
 
-The `release` workflow (`.github/workflows/release.yml`) tests, builds `recette.exe` on Windows and attaches it to a GitHub Release. The packaged app checks that release page once a day (setting "Vérifier les mises à jour") and offers a "Télécharger" button; it never replaces itself. From source, set `MAMARMITON_UPDATE_CHECK=1` to try it.
+The `release` workflow (`.github/workflows/release.yml`) tests, builds `recette.exe` on Windows and `mamarmiton-linux-x86_64` on Ubuntu 24.04, and attaches both to a GitHub Release. The packaged app checks that release page once a day (setting "Vérifier les mises à jour") and offers a "Télécharger" button; it never replaces itself. From source, set `MAMARMITON_UPDATE_CHECK=1` to try it.
 
 ## Project layout
 

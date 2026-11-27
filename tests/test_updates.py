@@ -21,9 +21,17 @@ def test_parse_version():
 
 
 def test_newer_release():
-    info = parse_release(release(), "4.0.0")
+    info = parse_release(release(), "4.0.0", platform="win32")
     assert info == UpdateInfo("4.1.0", "https://github.com/airtzro/mamarmiton/releases/tag/v4.1.0",
                               "https://x/recette.exe")
+
+
+def test_linux_gets_the_linux_binary_not_the_exe():
+    data = release()
+    assert parse_release(data, "4.0.0", platform="linux").download_url == ""  # no Linux build in this release
+    data["assets"].append({"name": "mamarmiton-linux-x86_64", "browser_download_url": "https://x/mamarmiton-linux-x86_64"})
+    assert parse_release(data, "4.0.0", platform="linux").download_url == "https://x/mamarmiton-linux-x86_64"
+    assert parse_release(data, "4.0.0", platform="win32").download_url == "https://x/recette.exe"
 
 
 def test_numeric_not_lexical():

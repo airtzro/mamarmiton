@@ -1,14 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Build the Windows executable:  pyinstaller recette.spec
+# Build the executable:  pyinstaller recette.spec
+#   Windows -> dist/recette.exe
+#   Linux   -> dist/mamarmiton (one file; see packaging/linux/build.sh)
 #
 # The AI model (model/*.gguf, ~1 GB) is NOT bundled: put the "model" folder
-# next to recette.exe (or in %LOCALAPPDATA%\recette_app\model).
+# next to the executable, or in the data folder (%LOCALAPPDATA%\recette_app\model
+# on Windows, ~/.local/share/recette_app/model on Linux).
+
+import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs
 
+WINDOWS = sys.platform.startswith("win")
+
 datas = [("assets/icon.ico", "assets"), ("assets/fonts", "assets/fonts")]
 binaries = []
-hiddenimports = []
+# Pillow finds Tk through this module at run time; PyInstaller cannot see that import
+hiddenimports = ["PIL._tkinter_finder", "PIL.ImageTk"]
 
 # customtkinter ships theme JSON files that must be bundled
 ctk_datas, ctk_binaries, ctk_hidden = collect_all("customtkinter")
@@ -48,11 +56,11 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="recette",
+    name="recette" if WINDOWS else "mamarmiton",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    console=False,  # no black console window behind the app
-    icon="assets/icon.ico",
+    strip=not WINDOWS,  # smaller Linux binary
+    upx=WINDOWS,  # UPX can break shared libraries on Linux
+    console=False,  # no black console window behind the app (Windows)
+    icon="assets/icon.ico" if WINDOWS else None,
 )

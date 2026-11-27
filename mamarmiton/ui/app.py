@@ -267,7 +267,8 @@ class App(ctk.CTk):
         theme.register_fonts()
         ctk.set_appearance_mode(APPEARANCES[self.settings.appearance])
         ctk.set_widget_scaling(TEXT_SIZES[self.settings.text_size])
-        super().__init__(fg_color=theme.BG)
+        # className sets the window class (WM_CLASS) that Linux launchers use to match the window to its icon
+        super().__init__(fg_color=theme.BG, className="Mamarmiton")
         use_portable_corners(self)
         fix_scaled_sizes()
         theme.resolve_fonts(self)
