@@ -1,3 +1,4 @@
+import pytest
 import json
 
 from mamarmiton.models import Recipe
@@ -150,3 +151,103 @@ def test_purge_removes_photos_after_delete(tmp_path):
     trashed = store.delete(r.id, keep_files=True)
     store.purge(trashed)
     assert not store.image_folder(r).exists()
+
+
+# ------------------------------------------------- data-integrity hunt
+def _store(tmp_path):
+    from mamarmiton.models import Recipe
+    from mamarmiton.storage import RecipeStore
+    s = RecipeStore(tmp_path / "r" / "recette.json", tmp_path / "r" / "img")
+    s.add(Recipe(nom="Un"))
+    s.add(Recipe(nom="Deux"))
+    return s
+
+
+def test_disk_full_while_writing_keeps_existing_file(tmp_path, monkeypatch):
+    import json as _json
+
+    from mamarmiton.models import Recipe
+    s = _store(tmp_path)
+    before = s.path.read_text(encoding="utf-8")
+
+    def full(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(_json, "dump", full)
+    with pytest.raises(OSError):
+        s.add(Recipe(nom="Trois"))
+    monkeypatch.undo()
+    assert s.path.read_text(encoding="utf-8") == before
+    assert not list(s.path.parent.glob("*.tmp"))
+
+
+def test_failing_bak_copy_never_truncates_a_good_bak(tmp_path, monkeypatch):
+    import pathlib
+
+    from mamarmiton.models import Recipe
+    s = _store(tmp_path)
+    bak = s.path.with_suffix(".json.bak")
+    good = bak.read_text(encoding="utf-8")
+
+    def half(self, data):  # writes half of the file, then the disk is full
+        with open(self, "wb") as f:
+            f.write(data[: len(data) // 2])
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(pathlib.Path, "write_bytes", half)
+    s.add(Recipe(nom="Trois"))  # the book itself is still saved
+    monkeypatch.undo()
+    assert bak.read_text(encoding="utf-8") == good
+    assert len(RecipeStore(s.path, s.images_root).all()) == 3
+
+
+def test_corrupt_main_does_not_overwrite_good_bak_on_next_save(tmp_path):
+    from mamarmiton.models import Recipe
+    from mamarmiton.storage import RecipeStore
+    s = _store(tmp_path)
+    s.path.write_text('[{"nom": "Un", ', encoding="utf-8")  # torn file
+    again = RecipeStore(s.path, s.images_root)
+    assert len(again.all()) >= 1 and again.warnings
+    again.add(Recipe(nom="Quatre"))
+    bak = s.path.with_suffix(".json.bak")
+    import json as _json
+    assert _json.loads(bak.read_text(encoding="utf-8")), "the .bak must stay a readable copy"
+
+
+def test_readonly_file_is_not_truncated(tmp_path):
+    import os
+
+    from mamarmiton.models import Recipe
+    s = _store(tmp_path)
+    before = s.path.read_text(encoding="utf-8")
+    os.chmod(s.path.parent, 0o500)
+    try:
+        if os.access(s.path.parent, os.W_OK):
+            pytest.skip("running as root")
+        with pytest.raises(OSError):
+            s.add(Recipe(nom="Trois"))
+    finally:
+        os.chmod(s.path.parent, 0o700)
+    assert s.path.read_text(encoding="utf-8") == before
+
+
+def test_v3_migration_is_idempotent_and_keeps_favorites_if_save_fails(tmp_path, monkeypatch):
+    import json as _json
+
+    from mamarmiton import storage
+    from mamarmiton.storage import RecipeStore
+    path = tmp_path / "r" / "recette.json"
+    path.parent.mkdir()
+    path.write_text(_json.dumps([{"nom": "Tarte"}, {"nom": "Flan"}]), encoding="utf-8")
+    fav = path.with_name("recette_fav.json")
+    fav.write_text(_json.dumps([{"nom": "Tarte"}]), encoding="utf-8")
+    real = storage._atomic_write_json
+    monkeypatch.setattr(storage, "_atomic_write_json", lambda *a, **k: (_ for _ in ()).throw(OSError(28, "full")))
+    with pytest.raises(OSError):
+        RecipeStore(path, path.parent / "img")
+    monkeypatch.setattr(storage, "_atomic_write_json", real)
+    assert fav.exists(), "favourites file must stay until the migrated data is safely saved"
+    first = RecipeStore(path, path.parent / "img")
+    assert [r.favori for r in first.all()] == [True, False]
+    second = RecipeStore(path, path.parent / "img")
+    assert [(r.id, r.nom, r.favori) for r in second.all()] == [(r.id, r.nom, r.favori) for r in first.all()]

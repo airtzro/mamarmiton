@@ -28,6 +28,20 @@ LEGACY_IMAGE_LIMIT = 12
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 
 
+def _fsync_dir(folder: Path) -> None:
+    """Make a rename durable (POSIX); a no-op where directories cannot be opened (Windows)."""
+    try:
+        fd = os.open(folder, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def _atomic_write_json(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
@@ -37,6 +51,7 @@ def _atomic_write_json(path: Path, data: object) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
+        _fsync_dir(path.parent)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
@@ -59,6 +74,7 @@ class Trashed:
     meta: dict | None = None
     server_delete_pending: bool = False
     conflicts: list = field(default_factory=list)
+    ops: list = field(default_factory=list)  # queued favourite / photo-delete operations dropped by delete
 
 
 def copy_as_variant(store, recipe: Recipe) -> Recipe:
@@ -108,6 +124,9 @@ class RecipeStore:
             changed |= self._migrate_legacy_images()
         if changed:
             self.save()
+        fav_path = self.path.with_name("recette_fav.json")
+        if fav_path.exists():  # only now that the migrated book is safely on disk
+            fav_path.replace(fav_path.with_suffix(".json.migre"))
 
     def _read_raw(self) -> list:
         if not self.path.exists() or self.path.stat().st_size == 0:
@@ -140,9 +159,28 @@ class RecipeStore:
         return data if isinstance(data, list) else []
 
     def save(self) -> None:
-        if self.path.exists() and self.path.stat().st_size > 0:
-            shutil.copy2(self.path, self.path.with_suffix(".json.bak"))
+        self._rotate_backup()
         _atomic_write_json(self.path, [r.to_dict() for r in self._recipes])
+
+    def _rotate_backup(self) -> None:
+        """Keep the current file as ``.bak``, but only if it is itself readable (a torn file must never
+        replace the last good backup), and never by writing into the old ``.bak`` in place."""
+        try:
+            if not self.path.exists() or self.path.stat().st_size == 0:
+                return
+            raw = self.path.read_bytes()
+            if not isinstance(json.loads(raw.decode("utf-8")), (list, dict)):
+                return
+        except (OSError, ValueError):
+            return
+        bak = self.path.with_suffix(".json.bak")
+        tmp = bak.with_name(bak.name + ".tmp")
+        try:
+            tmp.write_bytes(raw)
+            os.replace(tmp, bak)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            log.warning("Could not refresh %s", bak, exc_info=True)
 
     # ----------------------------------------------------------- migration
     def _migrate_favorites(self) -> bool:
@@ -158,7 +196,6 @@ class RecipeStore:
         for recipe in self._recipes:
             if fold(recipe.nom) in names:
                 recipe.favori = True
-        fav_path.rename(fav_path.with_suffix(".json.migre"))
         return bool(names)
 
     def _migrate_legacy_images(self) -> bool:

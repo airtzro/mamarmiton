@@ -8,7 +8,9 @@ pushes the queue, then pulls what changed on the server.
 Cache layout, in ``<data dir>/remote/<username>/``::
 
     cache.json    recipes + server meta (version, access, owner, images), last seq, conflicts
-    outbox.json   pending operations, in order
+                  and the pending operations ("outbox"), all in ONE atomic write so a crash can
+                  never leave an edit without its queued operation (or the other way round)
+    outbox.json   a copy of the pending operations, only read when cache.json is unreadable
     images/<recipe id>/<file>
 """
 
@@ -59,6 +61,16 @@ class SyncResult:
     error: str = ""
 
 
+def _same_content(a: Recipe, b: Recipe) -> bool:
+    """True when two recipes only differ by things that are not their content."""
+    def key(r: Recipe) -> dict:
+        d = r.to_dict()
+        for k in ("images", "favori", "modifie_le"):
+            d.pop(k, None)
+        return d
+    return key(a) == key(b)
+
+
 class RemoteStore:
     """Drop-in replacement for ``RecipeStore`` backed by the server.
 
@@ -107,12 +119,18 @@ class RemoteStore:
             return default
         try:
             with open(path, encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            if isinstance(data, type(default)):
+                return data
         except (OSError, ValueError):
-            aside = path.with_name(f"{path.stem}.corrompu-{datetime.now():%Y%m%d-%H%M%S}.json")
+            pass
+        aside = path.with_name(f"{path.stem}.corrompu-{datetime.now():%Y%m%d-%H%M%S}.json")
+        try:
             shutil.copy2(path, aside)
-            self.warnings.append(f"Un fichier du cache était illisible (copie : {aside.name}).")
-            return default
+        except OSError:
+            log.exception("Could not set aside %s", path)
+        self.warnings.append(f"Un fichier du cache était illisible (copie : {aside.name}).")
+        return default
 
     def _load(self) -> None:
         cache = self._read_json(self._cache_path, {})
@@ -129,19 +147,25 @@ class RemoteStore:
                                                 Recipe.from_dict(c["theirs"])))
             except (ValueError, KeyError, TypeError):
                 pass
-        outbox = self._read_json(self._outbox_path, [])
+        outbox = cache.get("outbox")
+        if not isinstance(outbox, list):  # old cache, or cache.json unreadable: use the copy
+            outbox = self._read_json(self._outbox_path, [])
         self._outbox = [op for op in outbox if isinstance(op, dict) and "op" in op]
 
     def _save(self) -> None:
         with self._lock:
             _atomic_write_json(self._cache_path, {
                 "seq": self._seq,
+                "outbox": self._outbox,
                 "recipes": {rid: {"recipe": r.to_dict(), "meta": self._meta[rid]}
                             for rid, r in self._recipes.items()},
                 "conflicts": [{"recipe_id": c.recipe_id, "mine": c.mine.to_dict(), "theirs": c.theirs.to_dict()}
                               for c in self._conflicts],
             })
-            _atomic_write_json(self._outbox_path, self._outbox)
+            try:  # only a fallback copy: the real queue is inside cache.json
+                _atomic_write_json(self._outbox_path, self._outbox)
+            except OSError:
+                log.warning("Could not write outbox.json", exc_info=True)
 
     def save(self) -> None:
         """Persist the cache; also queues favourite changes made directly on a recipe object."""
@@ -240,9 +264,10 @@ class RemoteStore:
             if not self.can_delete(recipe_id):
                 raise PermissionError(NOT_OWNER_MSG)
             on_server = self._meta[recipe_id].get("version") is not None
+            dropped = [o for o in self._outbox if o.get("id") == recipe_id and o["op"] in ("fav", "img_del")]
             self._drop_ops(recipe_id)
             trashed = Trashed(self._recipes.pop(recipe_id), meta=self._meta.pop(recipe_id),
-                              server_delete_pending=on_server,
+                              server_delete_pending=on_server, ops=dropped,
                               conflicts=[c for c in self._conflicts if c.recipe_id == recipe_id])
             self._conflicts = [c for c in self._conflicts if c.recipe_id != recipe_id]
             if not keep_files:
@@ -280,6 +305,8 @@ class RemoteStore:
             for name, image_id in list(meta["images"].items()):
                 if not image_id:  # photo not uploaded yet
                     self._push_op({"op": "img_add", "id": rid, "file": name})
+            if not (trashed.server_delete_pending and not cancelled):  # the server still has it as it was
+                self._outbox.extend(dict(o) for o in trashed.ops)
             self._sync_fav(rid, recipe)
             self._reconcile_images(recipe)
             self._save()
@@ -551,7 +578,7 @@ class RemoteStore:
             if exc.current:
                 self._conflict(op, exc.current, result)
             else:
-                self._create_exists(op)
+                self._create_exists(op, exc)
             return False
         except OfflineError:
             raise
@@ -559,10 +586,7 @@ class RemoteStore:
             raise
         except ApiError as exc:
             if exc.status in (403, 404) and op["base"] is None:
-                with self._lock:  # that id belongs to someone else: use a fresh one
-                    if rid in self._recipes:
-                        self._reid(rid)
-                        self._save()
+                self._reid_or_give_up(op, exc)
             elif exc.status in (403, 404):
                 self._rescue_copy(op, exc)
             else:
@@ -591,14 +615,25 @@ class RemoteStore:
                 mine = Recipe.from_dict(mine.to_dict())
             self._apply_item(current, force=True)
             theirs = self._recipes.get(rid)
-            if mine is not None and theirs is not None:
-                self._conflicts = [c for c in self._conflicts if c.recipe_id != rid]
+            if mine is not None and theirs is not None and _same_content(mine, theirs):
+                pass  # our own earlier upload whose answer got lost: nothing to settle
+            elif mine is not None and theirs is not None:
+                for old in [c for c in self._conflicts if c.recipe_id == rid]:
+                    self._conflicts.remove(old)  # never drop an unsettled version: keep it as a recipe
+                    self._keep_as_copy(old.mine)
                 self._conflicts.append(Conflict(rid, mine, Recipe.from_dict(theirs.to_dict())))
                 result.conflicts += 1
             result.changed = True
             self._save()
 
-    def _create_exists(self, op: dict) -> None:
+    def _keep_as_copy(self, source: Recipe) -> Recipe:
+        copy = Recipe.from_dict(source.to_dict())
+        copy.id = uuid.uuid4().hex
+        copy.nom = f"{source.nom} (ma version)"
+        copy.images, copy.favori = [], False
+        return self.add(copy)
+
+    def _create_exists(self, op: dict, exc: ApiError) -> None:
         """409 on create: either our earlier upload (answer lost) or another user's recipe id."""
         rid = op["id"]
         try:
@@ -614,8 +649,24 @@ class RemoteStore:
             if current and current["owner"] == self.username:
                 live["base"] = current["version"]
                 self._meta[rid]["version"] = current["version"]
-            else:
-                self._reid(rid)
+                self._save()
+                return
+        self._reid_or_give_up(op, exc)
+
+    def _reid_or_give_up(self, op: dict, exc: ApiError) -> None:
+        """The id is taken by someone else: use a fresh one. After a few tries the server refuses for
+        another reason (full book...): stop retrying, keep the recipe on this computer."""
+        with self._lock:
+            live = next((o for o in self._outbox if o["uid"] == op["uid"]), None)
+            if live is None or op["id"] not in self._recipes:
+                return
+            live["reids"] = live.get("reids", 0) + 1
+            if live["reids"] > 3:
+                self._remove_op(op["uid"])
+                self._save()
+                self._op_error = exc.message
+                return
+            self._reid(op["id"])
             self._save()
 
     def _rescue_copy(self, op: dict, exc: ApiError) -> None:
@@ -672,7 +723,7 @@ class RemoteStore:
                     recipe.images.remove(name)
                 if meta is not None:
                     meta["images"].pop(name, None)
-                path.unlink(missing_ok=True)
+                self._keep_refused_photo(path, rid)
                 result.changed = True
             self._op_failed(op, exc)
             return False
@@ -685,10 +736,27 @@ class RemoteStore:
             self._save()
         return True
 
+    def _keep_refused_photo(self, path: Path, rid: str) -> None:
+        """The server refused this photo (too heavy, unreadable...): never delete the cook's only
+        copy, move it to ``photos-refusees`` next to the cache."""
+        try:
+            aside = self.cache_dir / "photos-refusees"
+            aside.mkdir(parents=True, exist_ok=True)
+            target = aside / f"{rid[:8]}-{path.name}"
+            n = 1
+            while target.exists():
+                target = aside / f"{rid[:8]}-{n}-{path.name}"
+                n += 1
+            shutil.move(str(path), target)
+        except OSError:
+            log.exception("Could not set aside refused photo %s", path)
+
     # -- pull
     def _pull(self, result: SyncResult) -> None:
         since = 0 if self._full_pull else self._seq
         data = self.client.list_recipes(since)
+        if since and data["seq"] < since:  # the server went back in time (restored backup): start over
+            data = self.client.list_recipes(0)
         with self._lock:
             self._full_pull = False
             for item in data["recipes"]:
@@ -830,18 +898,33 @@ class RemoteStore:
                     entry["id"] = uuid.uuid4().hex
                 state[recipe.id] = entry
                 _atomic_write_json(state_path, state)
-            server_id = entry["id"]
-            try:
-                self.client.get_recipe(server_id)
-            except ApiError as exc:
-                if exc.status != 404:
+            for attempt in range(4):  # an id refused as "taken" / "invalid" gets a fresh one
+                server_id = entry["id"]
+                try:
+                    try:
+                        server_copy = self.client.get_recipe(server_id)
+                    except ApiError as exc:
+                        if exc.status != 404:
+                            raise
+                        data = recipe.to_dict()
+                        data["id"] = server_id
+                        server_copy = self.client.put_recipe(server_id, data, None)
+                    break
+                except (OfflineError, AuthError):
                     raise
-                data = recipe.to_dict()
-                data["id"] = server_id
-                self.client.put_recipe(server_id, data, None)
-            for name in recipe.images:
+                except ApiError as exc:
+                    if exc.status not in (403, 404, 409, 422) or attempt == 3:
+                        raise
+                    entry["id"] = uuid.uuid4().hex
+                    _atomic_write_json(state_path, state)
+            uploadable = [n for n in recipe.images if (local_store.image_folder(recipe) / n).is_file()]
+            already = len(server_copy.get("images") or [])
+            if already > len(entry["images"]):  # killed after a photo went up but before we noted it
+                entry["images"] = uploadable[:already]
+                _atomic_write_json(state_path, state)
+            for name in uploadable:
                 path = local_store.image_folder(recipe) / name
-                if name in entry["images"] or not path.is_file():
+                if name in entry["images"]:
                     continue
                 try:
                     self.client.upload_image(server_id, path)

@@ -287,10 +287,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return "edit" if any(r["can_edit"] for r in rows) else "read"
 
     def load_recipe(conn: sqlite3.Connection, user_id: int, recipe_id: str,
-                    need: tuple[Access, ...] = ("owner", "edit", "read")) -> tuple[sqlite3.Row, Access]:
+                    need: tuple[Access, ...] = ("owner", "edit", "read"),
+                    allow_deleted: bool = False) -> tuple[sqlite3.Row, Access]:
         row = conn.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
         access = access_to(conn, user_id, row) if row else None
-        if row is None or access is None or (row["deleted"] and access != "owner"):
+        # a tombstone is only visible to its owner, and only where asked (never a target for photos etc.)
+        if row is None or access is None or (row["deleted"] and (access != "owner" or not allow_deleted)):
             raise _error(404, "Recette introuvable.")  # never reveal recipes you cannot see
         if access not in need:
             raise _error(403, "Vous ne pouvez pas modifier cette recette.")
@@ -505,7 +507,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/recipes/{recipe_id}")
     def get_recipe(recipe_id: str, user: Session, conn: Conn) -> dict:
-        row, access = load_recipe(conn, user["id"], recipe_id)
+        row, access = load_recipe(conn, user["id"], recipe_id, allow_deleted=True)
         return recipe_out(conn, row, user["id"], access)
 
     @app.put("/recipes/{recipe_id}")
@@ -549,7 +551,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.delete("/recipes/{recipe_id}", status_code=204)
     def delete_recipe(recipe_id: str, user: Session, conn: Conn) -> Response:
         with db.transaction(conn):
-            row, _ = load_recipe(conn, user["id"], recipe_id, need=("owner",))
+            row, _ = load_recipe(conn, user["id"], recipe_id, need=("owner",), allow_deleted=True)
             if row["deleted"]:
                 return Response(status_code=204)
             files = conn.execute("SELECT filename FROM images WHERE recipe_id = ?", (recipe_id,)).fetchall()
@@ -594,6 +596,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         folder.mkdir(parents=True, exist_ok=True)
         filename = f"{image_id}.{ext}"
         with db.transaction(conn):
+            load_recipe(conn, user["id"], recipe_id, need=("owner", "edit"))  # deleted / unshared meanwhile?
             count = conn.execute("SELECT COUNT(*) FROM images WHERE recipe_id = ?", (recipe_id,)).fetchone()[0]
             if count >= settings.max_images_per_recipe:
                 raise _error(409, f"Maximum {settings.max_images_per_recipe} photos par recette.")
