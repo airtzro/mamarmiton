@@ -571,8 +571,8 @@ class Importer:
             confidence = reading.confidence
             if confidence is not None and confidence < LOW_CONFIDENCE:
                 warnings.insert(1, W_LOW_CONFIDENCE)
-        if method == "regles":
-            warnings.append(W_RULES)
+        if method == "regles" and not reading.ocr_pages and not pipeline.rules_are_clear(recipe):
+            warnings.append(W_RULES)  # one "vérifiez" is enough; a clearly laid-out text was copied as written
 
         if reading.names:
             recipe.source = reading.names[0]

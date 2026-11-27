@@ -207,7 +207,7 @@ def test_pasted_text_uses_the_rules(client, auth):
     body = r.json()
     assert body["method"] == "regles"
     assert body["dish_photo"] is None
-    assert "Lecture simple : vérifiez bien la recette." in body["warnings"]
+    assert body["warnings"] == []  # clear sections: copied as written, the editor's own notice is enough
     recipe = body["recipe"]
     assert set(recipe) == {"nom", "temps", "temps_cuisson", "pour", "type_plat", "type_cuisson", "ingredients",
                            "etapes", "notes", "tags", "source"}
@@ -435,6 +435,12 @@ def test_broken_pdf_is_422(client, auth):
 
 
 # ------------------------------------------------------------------ local model
+def test_unclear_text_gets_the_simple_reading_warning(client, auth):
+    body = post(client, auth, text="Tarte aux pommes\nmélanger la farine et le beurre puis cuire longtemps au four").json()
+    assert body["method"] == "regles"
+    assert "Lecture simple : vérifiez bien la recette." in body["warnings"]
+
+
 def test_clear_recipe_text_skips_the_local_model(client, app, auth):
     model = FakeModel({"nom": "Autre chose", "ingredients": [], "etapes": []})
     app.state.importer.model = model
