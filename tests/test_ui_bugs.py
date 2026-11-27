@@ -1,0 +1,86 @@
+"""Regression tests for bugs found by the desktop bug hunt (real window)."""
+
+import tkinter
+from tkinter import messagebox
+
+import pytest
+
+from mamarmiton.models import Ingredient, Recipe
+from mamarmiton.storage import RecipeStore
+
+
+def _pump(app, times=5):
+    for _ in range(times):
+        app.update_idletasks()
+        app.update()
+
+
+@pytest.fixture
+def app():
+    store = RecipeStore()
+    for i in range(3):
+        store.add(Recipe(nom=f"Recette {i}", tags=["Noël"] if i == 0 else [],
+                         ingredients=[Ingredient("farine", "100 g")], etapes=["Cuire 10 minutes."]))
+    store.save()
+    from mamarmiton.ui.app import App
+    try:
+        a = App()
+    except tkinter.TclError as exc:
+        pytest.skip(f"no usable display: {exc}")
+    _pump(a)
+    yield a
+    try:
+        a.destroy()
+    except tkinter.TclError:
+        pass
+
+
+def test_sidebar_follows_save_from_editor(app):
+    """After saving a new recipe the detail page is shown: the sidebar counts and tags must already be current."""
+    app.new_recipe()
+    _pump(app)
+    app.editor.e_nom.insert(0, "Nouvelle")
+    app.editor.e_tag.insert(0, "Fête")
+    app.editor.submit()
+    _pump(app)
+    assert app.current is app.detail
+    assert app.sidebar.items[None].count.cget("text") == "4"
+    assert "Fête" in [t for t, _n in app.sidebar._tags_signature[0]]
+
+
+def test_sidebar_follows_favorite_toggle_on_detail(app):
+    recipe = app.store.all()[0]
+    app.open_recipe(recipe)
+    _pump(app)
+    app.toggle_favorite(recipe)
+    _pump(app)
+    assert app.sidebar.items["__favoris__"].count.cget("text") == "1"
+
+
+def test_undo_delete_does_not_leave_the_editor(app, monkeypatch):
+    victim = app.store.all()[0]
+    app.open_recipe(victim)
+    app.delete_recipe(victim)
+    _pump(app)
+    app.new_recipe()
+    _pump(app)
+    app.editor.e_nom.insert(0, "Brouillon")
+    asked = []
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(1) or False)
+    button = next(w for w in app._toast.winfo_children() if hasattr(w, "invoke"))
+    button.invoke()
+    _pump(app)
+    assert app.current is app.editor and not asked
+    assert app.store.get(victim.id) is not None
+    assert app.editor.e_nom.get() == "Brouillon"
+
+
+def test_shortcuts_ignored_in_kitchen_mode(app):
+    recipe = app.store.all()[0]
+    app.open_recipe(recipe)
+    app.open_kitchen(recipe)
+    _pump(app)
+    app.new_recipe()
+    _pump(app)
+    assert app.current is not app.editor
+    app.close_kitchen()
