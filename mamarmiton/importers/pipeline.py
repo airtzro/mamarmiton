@@ -111,6 +111,16 @@ def merge(ai: Recipe, rules: Recipe, source: str = "") -> Recipe:
     return ai
 
 
+def rules_are_clear(rules: Recipe) -> bool:
+    """The text had clear sections, so the rules copied the ingredients and steps as written.
+
+    The small local model can only make such a recipe worse (it drops or swaps lines) and takes
+    about a minute, so it is kept for texts without clear sections.
+    """
+    with_quantity = sum(1 for ing in rules.ingredients if ing.quantite)
+    return len(rules.ingredients) >= 2 and with_quantity >= 1 and len(rules.etapes) >= 1
+
+
 def recipe_from_text(text: str, use_llm: bool = True,
                      progress: Progress | None = None) -> tuple[Recipe, str, list[str]]:
     """Any recipe text -> ``(recipe, method, warnings)``: the rule-based parser, then the local AI
@@ -121,7 +131,9 @@ def recipe_from_text(text: str, use_llm: bool = True,
     recipe = rules
     method = "règles"
 
-    if use_llm and llm.is_available():
+    if use_llm and rules_are_clear(rules):
+        pass  # nothing for the AI to add
+    elif use_llm and llm.is_available():
         report("Analyse par l'IA… (cela peut prendre une minute)")
         try:
             data = llm.parse_recipe_with_llm(text)

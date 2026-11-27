@@ -248,6 +248,7 @@ def test_pasted_text_uses_the_rules_without_ai(monkeypatch):
 
 def test_text_goes_through_the_same_ai_and_merge_as_pdfs(monkeypatch):
     monkeypatch.setattr(llm, "is_available", lambda: True)
+    monkeypatch.setattr(pipeline, "rules_are_clear", lambda rules: False)
     monkeypatch.setattr(llm, "parse_recipe_with_llm", lambda text: {
         "nom": "Gâteau", "temps": 99, "pour": 1, "ingredients": [{"nom": "yaourt", "quantité": "7 pots"}],
         "etapes": []})
@@ -294,3 +295,10 @@ def test_read_locally_routes_text_and_files(monkeypatch):
     assert il.read_locally([], "coucou", True, print) == "t"
     assert il.read_locally([Path("a.pdf")], None, True, print) == "f"
     assert seen == [("text", "coucou"), ("files", "")]
+
+
+def test_clear_text_skips_the_ai(monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    monkeypatch.setattr(llm, "parse_recipe_with_llm", lambda text: pytest.fail("the AI should not run"))
+    result = pipeline.import_text(SAMPLE)
+    assert result.method == "règles" and result.recipe.nom == "Gâteau au yaourt"

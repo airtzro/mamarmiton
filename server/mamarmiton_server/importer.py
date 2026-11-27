@@ -670,7 +670,7 @@ class Importer:
         warnings: list[str] = []
         rules = heuristic.parse_recipe_text(source)
         recipe, method = rules, "regles"
-        if self.model.available():
+        if self.model.available() and not pipeline.rules_are_clear(rules):
             remaining = deadline - self.clock()
             if remaining < MODEL_MIN_TIME_S:
                 warnings.append(W_MODEL_FAILED)

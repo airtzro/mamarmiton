@@ -80,3 +80,9 @@ def test_merge_prefers_stated_facts_over_invented_ones():
     merged = merge(ai, rules, source)
     assert (merged.temps_cuisson, merged.pour) == (25, 6)
     assert [(i.nom, i.quantite) for i in merged.ingredients] == [("farine", "100 g"), ("oeufs", "4"), ("sel", "3 g")]
+
+
+def test_ocr_noise_lines_are_not_steps():
+    from mamarmiton.importers.heuristic import parse_steps
+    lines = ["1. Préchauffer le four.", ". Verser la pâte et cuire.", "=", ".", "uo BW N", "2"]
+    assert parse_steps(lines) == ["Préchauffer le four.", "Verser la pâte et cuire."]

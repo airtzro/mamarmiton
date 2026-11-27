@@ -435,7 +435,16 @@ def test_broken_pdf_is_422(client, auth):
 
 
 # ------------------------------------------------------------------ local model
-def test_local_model_answer_is_merged_and_checked(client, app, auth):
+def test_clear_recipe_text_skips_the_local_model(client, app, auth):
+    model = FakeModel({"nom": "Autre chose", "ingredients": [], "etapes": []})
+    app.state.importer.model = model
+    body = post(client, auth, text=RECIPE_TEXT).json()
+    assert body["method"] == "regles" and model.texts == []  # the rules copied it as written
+    assert body["recipe"]["nom"] == "Tarte aux pommes"
+
+
+def test_local_model_answer_is_merged_and_checked(client, app, auth, monkeypatch):
+    monkeypatch.setattr(importer.pipeline, "rules_are_clear", lambda rules: False)
     answer = {"nom": "Tarte aux pommes de mamie", "temps": 15, "temps_cuisson": 35, "pour": 8,
               "type_plat": "Dessert", "type_cuisson": "Four",
               "ingredients": [{"nom": "farine", "quantité": "300 g"}, {"nom": "beurre", "quantité": "125 g"}],
@@ -459,7 +468,8 @@ def test_local_model_answer_is_merged_and_checked(client, app, auth):
     (FakeModel(error=concurrent.futures.TimeoutError()), "L'analyse fine n'a pas abouti"),
     (FakeModel(error=importer.ModelBusy()), "occupée"),
 ])
-def test_local_model_problems_fall_back_to_the_rules(client, app, auth, model, warning):
+def test_local_model_problems_fall_back_to_the_rules(client, app, auth, model, warning, monkeypatch):
+    monkeypatch.setattr(importer.pipeline, "rules_are_clear", lambda rules: False)
     app.state.importer.model = model
     body = post(client, auth, text=RECIPE_TEXT).json()
     assert body["method"] == "regles"

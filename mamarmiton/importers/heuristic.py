@@ -21,6 +21,8 @@ NOTE_SECTIONS = {"astuce", "astuces", "conseil", "conseils", "note", "notes"}
 URL_RE = re.compile(r"(https?://|www\.|\.(fr|com|net|org)\b)", re.IGNORECASE)
 STEP_START_RE = re.compile(r"^(?:[-•*]\s*|(?:[ée]tape\s*)?\d{1,2}\s*[).:\-–]?\s+)(?=\S)", re.IGNORECASE)
 BARE_NUMBER_RE = re.compile(r"^\d{1,2}[).]?$")
+WORD_RE = re.compile(r"[^\W\d_]{3,}")  # a line without any 3-letter word is OCR noise (step numbers, rules)
+LEADING_PUNCT_RE = re.compile(r"^[.,;:=_~|]+\s*")
 STOPWORD_NAMES = {"", "de", "d'", "des", "du", "en", "et"}
 
 DESSERT_WORDS = ["dessert", "gateau", "tarte au sucre", "chocolat", "mousse", "biscuit", "cake", "cookie",
@@ -148,8 +150,8 @@ def parse_ingredients(lines: list[str]) -> list[Ingredient]:
 def parse_steps(lines: list[str]) -> list[str]:
     steps: list[str] = []
     for raw in lines:
-        line = raw.strip()
-        if not line or URL_RE.search(line) or BARE_NUMBER_RE.match(line):
+        line = LEADING_PUNCT_RE.sub("", raw.strip())
+        if not line or URL_RE.search(line) or BARE_NUMBER_RE.match(line) or not WORD_RE.search(line):
             continue
         starts_new = bool(STEP_START_RE.match(line))
         text = STEP_START_RE.sub("", line).strip()
