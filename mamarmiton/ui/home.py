@@ -204,6 +204,8 @@ class HomeView(ctk.CTkFrame):
 
     def _changed(self) -> None:
         self._debounce = None
+        if self.app.current not in (self, None):  # typed, then left for a recipe: do not drag them back
+            return
         self.app.go_home()
 
     def _sort_changed(self) -> None:

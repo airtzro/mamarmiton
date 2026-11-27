@@ -84,3 +84,34 @@ def test_shortcuts_ignored_in_kitchen_mode(app):
     _pump(app)
     assert app.current is not app.editor
     app.close_kitchen()
+
+
+def test_search_debounce_does_not_pull_user_off_the_recipe(app):
+    app.home.search.entry.insert(0, "Rec")
+    app.home.search._typed()  # schedules the debounced refresh
+    app.open_recipe(app.store.all()[0])
+    _pump(app)
+    app.after(400, lambda: None)
+    for _ in range(40):
+        app.update()
+        app.after(20)
+    import time
+    time.sleep(0.4)
+    _pump(app)
+    assert app.current is app.detail
+
+
+def test_timer_cancel_stops_ringing(app, monkeypatch):
+    from mamarmiton.ui import timerbar
+    rings = []
+    monkeypatch.setattr(timerbar, "beep", lambda w: rings.append(1))
+    monkeypatch.setattr(timerbar, "RING_GAP_MS", 20)
+    timer = app.timers.start("Étape 1", 1)
+    timer.end = 0
+    app.timers._tick()
+    assert len(rings) == 1
+    app.timers.cancel(timer)
+    import time
+    time.sleep(0.2)
+    _pump(app)
+    assert len(rings) == 1
