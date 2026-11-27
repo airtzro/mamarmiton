@@ -105,3 +105,48 @@ def test_export_import(isolated_data_dir, tmp_path):
     out.write_text(json.dumps(data), encoding="utf-8")
     assert store.import_from(out) == 1
     assert len(store) == 2
+
+
+# ------------------------------------------------- variante / annuler la suppression
+def _store_with_photo(tmp_path):
+    from PIL import Image
+
+    store = RecipeStore(tmp_path / "r.json", tmp_path / "imgs")
+    r = store.add(Recipe(nom="Tarte", etapes=["Cuire"], favori=True))
+    src = tmp_path / "p.png"
+    Image.new("RGB", (8, 8), "red").save(src)
+    store.add_image(r, src)
+    return store, r
+
+
+def test_duplicate_gives_independent_copy(tmp_path):
+    store, r = _store_with_photo(tmp_path)
+    copy = store.duplicate(r.id)
+    assert copy.id != r.id and copy.nom == "Tarte (variante)" and not copy.favori
+    assert copy.etapes == ["Cuire"] and len(store) == 2
+    assert store.image_folder(copy) != store.image_folder(r)
+    assert len(store.image_paths(copy)) == 1
+    store.delete(r.id)  # deleting the original keeps the copy's photo
+    assert len(store.image_paths(copy)) == 1
+    assert RecipeStore(tmp_path / "r.json", tmp_path / "imgs").get(copy.id).images == copy.images
+    assert store.duplicate("nope") is None
+
+
+def test_delete_restore_keeps_everything(tmp_path):
+    store, r = _store_with_photo(tmp_path)
+    other = store.add(Recipe(nom="Autre"))
+    trashed = store.delete(r.id, keep_files=True)
+    assert store.get(r.id) is None and store.image_paths(r) != []  # photo still on disk
+    store.restore(trashed)
+    assert [x.id for x in store.all()] == [r.id, other.id]
+    again = RecipeStore(tmp_path / "r.json", tmp_path / "imgs").get(r.id)
+    assert again.favori and again.images == r.images and len(store.image_paths(again)) == 1
+    store.purge(trashed)  # restored: purge must not touch the photos
+    assert len(store.image_paths(r)) == 1
+
+
+def test_purge_removes_photos_after_delete(tmp_path):
+    store, r = _store_with_photo(tmp_path)
+    trashed = store.delete(r.id, keep_files=True)
+    store.purge(trashed)
+    assert not store.image_folder(r).exists()

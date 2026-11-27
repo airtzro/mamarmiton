@@ -25,7 +25,7 @@ from mamarmiton.ui.detail import DetailView
 from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, ask_image, ask_pdf
 from mamarmiton.ui.editor import EditorView
 from mamarmiton.ui.home import HomeView
-from mamarmiton.ui.widgets import IconLine, NavItem, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
+from mamarmiton.ui.widgets import IconLine, NavItem, Toast, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
 
 log = logging.getLogger(__name__)
 
@@ -186,6 +186,7 @@ class App(ctk.CTk):
         self._conflict_dialog: ConflictDialog | None = None
         self._snoozed: set[str] = set()  # conflicts postponed with "Décider plus tard"
         self._fetching_people = False
+        self._toast: Toast | None = None
         self.runner = rl.SyncRunner(self, self.on_sync_done, on_state=self._update_account_area)
 
         self.grid_columnconfigure(1, weight=1)
@@ -343,19 +344,51 @@ class App(ctk.CTk):
 
         self._open_editor(recipe, save)
 
+    def duplicate_recipe(self, recipe: Recipe | None) -> None:
+        """Copy the recipe as "<titre> (variante)" in the same book, then open the editor on the copy."""
+        if recipe is None:
+            return
+        if not self.can_leave_editor():
+            return
+        copy = self.store.duplicate(recipe.id)
+        if copy is None:
+            return
+        self._mutated()
+        self.edit_recipe(copy)
+
     def delete_recipe(self, recipe: Recipe | None) -> None:
         if recipe is None:
             return
-        if not messagebox.askyesno("Supprimer la recette",
-                                   f"Supprimer définitivement « {recipe.nom} » ?\nCette action est irréversible.",
-                                   icon="warning", parent=self):
-            return
+        self.finish_pending_delete()
         try:
-            self.store.delete(recipe.id)
+            trashed = self.store.delete(recipe.id, keep_files=True)
         except PermissionError as exc:
             return self._denied(exc)
+        if trashed is None:
+            return
         self._mutated()
         self.go_home()
+        store = self.store
+
+        def undo() -> None:
+            self._toast = None
+            if store is not self.store:  # the book was switched meanwhile
+                return store.purge(trashed)
+            store.restore(trashed)
+            self._mutated()
+            self.go_home()
+
+        def expire() -> None:
+            self._toast = None
+            store.purge(trashed)
+
+        self._toast = Toast(self, "Recette supprimée", "Annuler", undo, expire, seconds=10)
+
+    def finish_pending_delete(self) -> None:
+        """Make a delete that can still be undone final (new delete, quit, book switch)."""
+        toast = getattr(self, "_toast", None)
+        if toast is not None:
+            toast.dismiss()
 
     def toggle_favorite(self, recipe: Recipe | None) -> None:
         if recipe is None:
@@ -475,6 +508,7 @@ class App(ctk.CTk):
 
     def sign_in(self, client, account) -> None:
         """Switch to the server-backed book for ``account`` (``client`` holds a fresh token)."""
+        self.finish_pending_delete()
         old = self.store
         self.runner.stop()
         if self.is_remote and old.username == account.username:
@@ -496,6 +530,7 @@ class App(ctk.CTk):
 
     def sign_out(self) -> None:
         """Back to the local book; the server session ends, the offline cache stays on disk."""
+        self.finish_pending_delete()
         old = self.store
         self.runner.stop()
         if isinstance(old, RemoteStore):
@@ -605,6 +640,7 @@ class App(ctk.CTk):
         self.after(300, self._check_conflicts)
 
     def _quit(self) -> None:
+        self.finish_pending_delete()
         self.runner.stop()
         if self.is_remote:
             self.store.save()

@@ -378,3 +378,67 @@ def test_account_roundtrip_and_open_store():
         assert (config.data_dir() / "account.json").stat().st_mode & 0o777 == 0o600
     clear_account()
     assert load_account() is None
+
+
+# ------------------------------------------------- variante / annuler la suppression
+def test_remote_duplicate_syncs_with_own_photos(make_store, http, tmp_path):
+    store = make_store("dupli")
+    r = store.add(recipe("Quiche"))
+    store.add_image(r, png(tmp_path / "a.png"))
+    store.sync()
+    copy = store.duplicate(r.id)
+    assert copy.id != r.id and copy.nom == "Quiche (variante)" and store.can_edit(copy.id)
+    assert len(store.image_paths(copy)) == 1 and store.image_folder(copy) != store.image_folder(r)
+    store.sync()
+    other = login_store(http, tmp_path, "dupli", "b")
+    other.sync()
+    assert other.get(copy.id).nom == "Quiche (variante)" and len(other.get(copy.id).images) == 1
+    store.delete(r.id)
+    assert len(store.image_paths(copy)) == 1
+
+
+def test_remote_restore_before_sync_cancels_delete(make_store, http, tmp_path):
+    store = make_store("undo1")
+    r = store.add(recipe("Soupe", favori=True))
+    store.add_image(r, png(tmp_path / "a.png"))
+    store.sync()
+    trashed = store.delete(r.id, keep_files=True)
+    assert any(o["op"] == "delete" for o in store._outbox)
+    store.restore(trashed)
+    assert not any(o["op"] == "delete" for o in store._outbox)
+    store.sync()
+    fresh = login_store(http, tmp_path, "undo1", "b")
+    fresh.sync()
+    got = fresh.get(r.id)
+    assert got and got.favori and len(got.images) == 1
+
+
+def test_remote_restore_after_delete_was_synced_recreates(make_store, http, tmp_path):
+    store = make_store("undo2")
+    r = store.add(recipe("Crêpes", favori=True))
+    store.add_image(r, png(tmp_path / "a.png"))
+    store.sync()
+    trashed = store.delete(r.id, keep_files=True)
+    store.sync()  # the delete reached the server
+    store.restore(trashed)
+    store.sync()
+    assert store.pending_count == 0
+    fresh = login_store(http, tmp_path, "undo2", "b")
+    fresh.sync()
+    got = fresh.get(r.id)
+    assert got and got.favori and len(got.images) == 1
+
+
+def test_remote_restore_unsynced_recipe_and_purge(make_store, tmp_path):
+    store = make_store("undo3")
+    r = store.add(recipe("Flan"))
+    store.add_image(r, png(tmp_path / "a.png"))
+    trashed = store.delete(r.id, keep_files=True)
+    assert store.pending_count == 0
+    store.restore(trashed)
+    store.sync()
+    assert store.pending_count == 0 and store.get(r.id)
+    trashed = store.delete(r.id, keep_files=True)
+    store.sync()
+    store.purge(trashed)
+    assert not store.image_folder(r).exists()

@@ -27,7 +27,7 @@ from typing import Callable
 from mamarmiton import config
 from mamarmiton.models import Recipe
 from mamarmiton.remote.client import ApiClient, ApiError, AuthError, ConflictError, OfflineError
-from mamarmiton.storage import RecipeStore, _atomic_write_json
+from mamarmiton.storage import RecipeStore, Trashed, _atomic_write_json, copy_as_variant
 
 log = logging.getLogger(__name__)
 
@@ -223,22 +223,73 @@ class RemoteStore:
             self._reconcile_images(recipe)
             self._save()
 
-    def delete(self, recipe_id: str) -> None:
-        """Delete a recipe you own (``PermissionError`` otherwise)."""
+    def duplicate(self, recipe_id: str) -> Recipe | None:
+        """Copy a recipe (mine or shared with me) as a new recipe of mine in this book."""
+        with self._lock:
+            recipe = self._recipes.get(recipe_id)
+            return copy_as_variant(self, recipe) if recipe else None
+
+    def delete(self, recipe_id: str, keep_files: bool = False) -> Trashed | None:
+        """Delete a recipe you own (``PermissionError`` otherwise).
+
+        With ``keep_files`` the photos stay on disk so ``restore`` can undo it.
+        """
         with self._lock:
             if recipe_id not in self._recipes:
-                return
+                return None
             if not self.can_delete(recipe_id):
                 raise PermissionError(NOT_OWNER_MSG)
             on_server = self._meta[recipe_id].get("version") is not None
             self._drop_ops(recipe_id)
-            del self._recipes[recipe_id]
-            del self._meta[recipe_id]
+            trashed = Trashed(self._recipes.pop(recipe_id), meta=self._meta.pop(recipe_id),
+                              server_delete_pending=on_server,
+                              conflicts=[c for c in self._conflicts if c.recipe_id == recipe_id])
             self._conflicts = [c for c in self._conflicts if c.recipe_id != recipe_id]
-            shutil.rmtree(self.images_root / recipe_id, ignore_errors=True)
+            if not keep_files:
+                shutil.rmtree(self.images_root / recipe_id, ignore_errors=True)
             if on_server:
                 self._push_op({"op": "delete", "id": recipe_id})
             self._save()
+            return trashed
+
+    def restore(self, trashed: Trashed) -> Recipe:
+        """Undo ``delete(keep_files=True)``.
+
+        If the queued server delete has not been sent yet it is cancelled and the
+        recipe goes on as it was; if it already went out, the recipe is created
+        again on the server (same id) together with its photos.
+        """
+        recipe, rid = trashed.recipe, trashed.recipe.id
+        with self._lock:
+            if rid in self._recipes:
+                return self._recipes[rid]
+            cancelled = None
+            if trashed.server_delete_pending:
+                cancelled = self._find_op("delete", rid)
+                if cancelled:
+                    self._outbox.remove(cancelled)
+            meta = dict(trashed.meta or {})
+            meta["images"] = dict(meta.get("images") or {})
+            if trashed.server_delete_pending and not cancelled:  # already deleted on the server
+                meta.update(version=None, images={}, server_images=[], fav=False)
+            self._recipes[rid] = recipe
+            self._meta[rid] = meta
+            self._conflicts.extend(trashed.conflicts)
+            # operations dropped by delete(): queue them again
+            self._queue_put(rid)
+            for name, image_id in list(meta["images"].items()):
+                if not image_id:  # photo not uploaded yet
+                    self._push_op({"op": "img_add", "id": rid, "file": name})
+            self._sync_fav(rid, recipe)
+            self._reconcile_images(recipe)
+            self._save()
+            return recipe
+
+    def purge(self, trashed: Trashed) -> None:
+        """Remove the photo files of a deleted recipe for good (no-op if it was restored)."""
+        with self._lock:
+            if trashed.recipe.id not in self._recipes:
+                shutil.rmtree(self.images_root / trashed.recipe.id, ignore_errors=True)
 
     def toggle_favorite(self, recipe_id: str) -> bool:
         with self._lock:

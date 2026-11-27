@@ -199,6 +199,39 @@ class Modal(ctk.CTkToplevel):
                 pass
 
 
+class Toast(ctk.CTkFrame):
+    """A short message with one action, floating at the bottom of the window (e.g. "Annuler")."""
+
+    def __init__(self, master, message: str, action_text: str, on_action: Callable[[], None],
+                 on_expire: Callable[[], None], seconds: int = 10):
+        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER_STRONG,
+                         corner_radius=theme.RADIUS)
+        self._on_expire = on_expire
+        self._done = False
+        ctk.CTkLabel(self, text=message, font=theme.font(14), text_color=theme.TEXT, anchor="w",
+                     justify="left", wraplength=480).pack(side="left", padx=(18, 8), pady=12)
+        theme.link_button(self, text=action_text, command=lambda: self._finish(on_action)).pack(
+            side="left", padx=(0, 10), pady=8)
+        self.place(relx=0.5, rely=1.0, anchor="s", y=-24)
+        self.lift()
+        self._timer = self.after(seconds * 1000, lambda: self._finish(on_expire))
+
+    def _finish(self, callback: Callable[[], None]) -> None:
+        if self._done:
+            return
+        self._done = True
+        try:
+            self.after_cancel(self._timer)
+        except Exception:
+            pass
+        self.destroy()
+        callback()
+
+    def dismiss(self) -> None:
+        """Close the toast now, running its expiry callback."""
+        self._finish(self._on_expire)
+
+
 class IconLine(ctk.CTkFrame):
     """An icon with a text that wraps beside it (a label with ``compound="left"`` wraps under the icon)."""
 
