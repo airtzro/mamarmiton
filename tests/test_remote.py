@@ -442,3 +442,20 @@ def test_remote_restore_unsynced_recipe_and_purge(make_store, tmp_path):
     store.sync()
     store.purge(trashed)
     assert not store.image_folder(r).exists()
+
+
+def test_tags_round_trip_through_the_server(make_store, http, tmp_path):
+    a = make_store("alice")
+    r = recipe()
+    r.tags = ["Noël", "sans gluten"]
+    a.add(r)
+    a.sync()
+    b = login_store(http, tmp_path, "alice", "b")
+    b.sync()
+    assert b.get(r.id).tags == ["Noël", "sans gluten"]
+    edited = b.get(r.id)
+    edited.tags = ["rapide"]
+    b.update(edited)
+    b.sync()
+    a.sync()
+    assert a.get(r.id).tags == ["rapide"]

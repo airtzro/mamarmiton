@@ -32,6 +32,36 @@ def fold(text: str) -> str:
     return strip_accents(str(text)).casefold().strip()
 
 
+MAX_TAGS = 20
+MAX_TAG_LEN = 30
+
+
+def normalize_tags(raw: Any) -> list[str]:
+    """Clean a list of tags: trimmed, single spaces, no duplicates (case and accents ignored).
+
+    The first spelling wins; tags are cut to ``MAX_TAG_LEN`` characters and the
+    list to ``MAX_TAGS`` entries. Anything that is not a list of strings is ignored.
+    """
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    if not isinstance(raw, (list, tuple)):
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        tag = " ".join(item.split())[:MAX_TAG_LEN].strip()
+        key = fold(tag)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(tag)
+        if len(result) >= MAX_TAGS:
+            break
+    return result
+
+
 def _normalize_choice(value: Any, choices: list[str], default: str) -> str:
     wanted = fold(value or "")
     for choice in choices:
@@ -115,6 +145,7 @@ class Recipe:
     notes: str = ""
     favori: bool = False
     images: list[str] = field(default_factory=list)  # file names inside images/<id>/
+    tags: list[str] = field(default_factory=list)  # free labels: "Noël", "sans gluten"...
     source: str = ""  # e.g. the PDF file name it was imported from
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     cree_le: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -141,6 +172,7 @@ class Recipe:
             "notes": self.notes,
             "favori": self.favori,
             "images": list(self.images),
+            "tags": normalize_tags(self.tags),
             "source": self.source,
             "cree_le": self.cree_le,
             "modifie_le": self.modifie_le,
@@ -169,6 +201,7 @@ class Recipe:
             notes=str(data.get("notes") or ""),
             favori=bool(data.get("favori", False)),
             images=[str(x) for x in data.get("images") or [] if isinstance(x, str)],
+            tags=normalize_tags(data.get("tags")),
             source=str(data.get("source") or ""),
             modifie_le=str(data.get("modifie_le") or ""),
         )

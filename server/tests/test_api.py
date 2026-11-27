@@ -274,3 +274,16 @@ def test_deleting_recipe_removes_its_images(client, settings):
     client.post(f"/recipes/{RID}/images", files={"file": ("p.jpg", jpeg_bytes(), "image/jpeg")}, headers=maman)
     client.delete(f"/recipes/{RID}", headers=maman)
     assert not (settings.images_dir / RID).exists()
+
+
+def test_tags_round_trip_and_validation(client, settings):
+    h = register(client, settings, "maman")
+    r = put(client, h, tags=["Noël", " noel", "sans   gluten", "", "x" * 50])
+    assert r.status_code == 200
+    assert r.json()["recipe"]["tags"] == ["Noël", "sans gluten", "x" * 30]
+    assert client.get(f"/recipes/{RID}", headers=h).json()["recipe"]["tags"] == ["Noël", "sans gluten", "x" * 30]
+    assert put(client, h, rid=RID2).json()["recipe"]["tags"] == []  # old clients send none
+    too_many = put(client, h, rid=RID2, base=1, tags=[f"t{i}" for i in range(40)])
+    assert len(too_many.json()["recipe"]["tags"]) == 20  # same cap as the desktop
+    for bad in ("Noël", 3, {"a": 1}, ["ok", 4], [["nested"]]):
+        assert put(client, h, rid=RID2, base=2, tags=bad).status_code == 422

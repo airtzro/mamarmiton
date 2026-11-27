@@ -48,3 +48,25 @@ def test_from_dict_rejects_non_dict():
 def test_parse_ingredient_lines():
     items = parse_ingredient_lines("Farine: 500 g\n3 oeufs\n\n- Sel\n")
     assert [(i.nom, i.quantite) for i in items] == [("Farine", "500 g"), ("oeufs", "3"), ("Sel", "")]
+
+
+def test_tags_default_empty_and_old_files_load():
+    r = Recipe.from_dict({"nom": "Vieille recette"})
+    assert r.tags == []
+    assert Recipe.from_dict(r.to_dict()).tags == []
+
+
+def test_tags_are_normalised():
+    raw = ["  Noël ", "noel", "sans   gluten", "SANS GLUTEN", "", "  ", 3, None, "x" * 50]
+    r = Recipe.from_dict({"nom": "A", "tags": raw})
+    assert r.tags == ["Noël", "sans gluten", "x" * 30]
+    assert r.to_dict()["tags"] == r.tags
+
+
+def test_tags_limit_and_bad_shapes():
+    r = Recipe.from_dict({"nom": "A", "tags": [f"t{i}" for i in range(50)]})
+    assert len(r.tags) == 20
+    assert Recipe.from_dict({"nom": "A", "tags": 12}).tags == []
+    assert Recipe.from_dict({"nom": "A", "tags": {"a": 1}}).tags == []
+    r2 = Recipe(nom="B", tags=["Rapide", "rapide "])  # set by code, cleaned when saved
+    assert r2.to_dict()["tags"] == ["Rapide"]

@@ -22,7 +22,7 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 | ~~**Timers in steps**~~ (done, with Kitchen mode) | Detect "25 minutes" in a step and show a ▶ button that starts a countdown with a sound. | S |
 | ~~**Duplicate a recipe**~~ (done) | "Créer une variante" button: copy, then open the editor. | S |
 | ~~**Undo delete**~~ (done) | A toast with "Annuler" for 10 s instead of only a confirm dialog (the store already keeps `.bak`). | S |
-| **Tags** | Free tags ("Noël", "rapide", "sans gluten") with chips in the sidebar filter. | S |
+| ~~**Tags**~~ (done: editor, sidebar "Étiquettes", web) | Free tags ("Noël", "rapide", "sans gluten") with chips in the sidebar filter. | S |
 | **Pick the cover photo** | Choose which photo shows on the card; reorder photos. | S |
 | **Drag & drop a PDF** onto the window to import it (tkinterdnd2). | Fewer clicks | S |
 

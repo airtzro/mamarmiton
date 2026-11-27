@@ -33,11 +33,12 @@ class Filters:
     max_minutes: int | None = None
     ingredients: list[str] = field(default_factory=list)
     favorites_only: bool = False
+    tags: list[str] = field(default_factory=list)  # the recipe must have all of them
 
     def is_empty(self) -> bool:
         return not (
             self.text.strip() or self.type_plat or self.type_cuisson or self.max_minutes
-            or self.ingredients or self.favorites_only
+            or self.ingredients or self.favorites_only or self.tags
         )
 
 
@@ -59,9 +60,14 @@ def matches(recipe: Recipe, f: Filters) -> bool:
         return False
     if any(not _has_ingredient(recipe, ing) for ing in f.ingredients):
         return False
+    if f.tags:
+        have = {fold(t) for t in recipe.tags}
+        if any(fold(t) not in have for t in f.tags):
+            return False
     words = fold(f.text).split()
     if words:
-        haystack = " ".join([fold(recipe.nom), *(fold(i.nom) for i in recipe.ingredients)])
+        haystack = " ".join([fold(recipe.nom), *(fold(i.nom) for i in recipe.ingredients),
+                             *(fold(t) for t in recipe.tags)])
         if not all(w in haystack for w in words):
             return False
     return True
@@ -86,3 +92,15 @@ def parse_ingredient_query(text: str) -> list[str]:
     """``"farine, oeufs\\nbeurre"`` -> ``["farine", "oeufs", "beurre"]``."""
     parts = text.replace(";", ",").replace("\n", ",").split(",")
     return [p.split(":")[0].strip() for p in parts if p.strip()]
+
+
+def tag_counts(recipes: list[Recipe]) -> list[tuple[str, int]]:
+    """Every tag of the book with its recipe count: most used first, then A to Z."""
+    counts: dict[str, int] = {}
+    names: dict[str, str] = {}
+    for recipe in recipes:
+        for tag in recipe.tags:
+            key = fold(tag)
+            names.setdefault(key, tag)
+            counts[key] = counts.get(key, 0) + 1
+    return sorted(((names[k], n) for k, n in counts.items()), key=lambda x: (-x[1], fold(x[0])))

@@ -156,6 +156,11 @@ def clean_recipe(raw: dict, recipe_id: str) -> dict:
     ``favori`` (per user) and ``images`` (managed by the image endpoints) are
     not stored in the recipe itself.
     """
+    tags = raw.get("tags") if isinstance(raw, dict) else None
+    if tags is not None and (not isinstance(tags, list) or not all(isinstance(t, str) for t in tags)):
+        raise _error(422, "Les étiquettes doivent être une liste de textes.")
+    if tags and len(tags) > MAX_ITEMS:
+        raise _error(422, "Trop d'étiquettes.")
     try:
         recipe = Recipe.from_dict(raw)
     except (ValueError, TypeError, OverflowError) as exc:  # OverflowError: {"temps": Infinity}

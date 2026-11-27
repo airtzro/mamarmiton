@@ -13,7 +13,7 @@ from mamarmiton.models import Recipe, format_minutes
 from mamarmiton.quantities import scale_quantity
 from mamarmiton.timers import find_durations, format_short
 from mamarmiton.ui import art, remote_logic as rl, theme
-from mamarmiton.ui.widgets import Modal, ScrollFrame, bind_tree, pointer_inside, set_cursor_tree
+from mamarmiton.ui.widgets import FlowFrame, Modal, ScrollFrame, bind_tree, pointer_inside, set_cursor_tree
 
 if TYPE_CHECKING:
     from mamarmiton.ui.app import App
@@ -231,6 +231,13 @@ class DetailView(ctk.CTkFrame):
             theme.chip(info, "  Lecture seule", fg=theme.ACCENT_SOFT, text_color=theme.ACCENT_TEXT,
                        image=art.icon("eye", theme.ACCENT_TEXT, 14), compound="left").pack(anchor="w", pady=(8, 0))
 
+        if r.tags:
+            flow = FlowFrame(info)
+            flow.pack(anchor="w", fill="x", pady=(8, 0))
+            flow.set_items([
+                ctk.CTkButton(flow, text=f"#{t}", height=28, width=0, corner_radius=14, font=theme.font(12, "bold"),
+                              fg_color=theme.SURFACE_ALT, hover_color=theme.ACCENT_SOFT, text_color=theme.TEXT,
+                              command=lambda t=t: self.app.filter_by_tag(t)) for t in r.tags])
         title = theme.heading(info, r.nom, size=36, wraplength=560)
         title.pack(anchor="w", fill="x", pady=(14, 0))
         self._wrapped.append((title, "title"))

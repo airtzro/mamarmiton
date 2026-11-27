@@ -145,6 +145,12 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
     const info = h("div", { class: "hero-info" },
       h("p", {}, h("span", { class: `chip chip-dish ${dishClass(recipe.type_plat)}`, text: recipe.type_plat }), " ",
         h("span", { class: "chip", text: recipe.type_cuisson })),
+      recipe.tags.length
+        ? h("p", { class: "tag-list" }, recipe.tags.map((tag) => h("button", {
+          class: "chip chip-btn chip-tag", type: "button", title: `Voir les recettes « ${tag} »`,
+          onClick: () => { state.filters.text = ""; state.filters.category = ""; state.filters.tags = [tag]; location.hash = "#/"; },
+          text: `#${tag}` })))
+        : null,
       h("h1", { class: "serif", text: recipe.nom }),
       recipe.access !== "owner"
         ? h("p", { class: "owner-note" }, icon("eye", 18), `Recette de ${displayName(recipe.owner)}`,

@@ -1,6 +1,7 @@
 import { h, icon, clear } from "./dom.js";
 import { allRecipes, canEdit, displayName, photos, setFavorite, state } from "./state.js";
-import { DISH_TYPES, SORTS, formatMinutes, search, totalTime } from "./search.js";
+import { DISH_TYPES, SORTS, formatMinutes, search, tagCounts, totalTime } from "./search.js";
+import { fold } from "./search.js";
 import { toast } from "./ui.js";
 import { openShareDialog } from "./share.js";
 
@@ -78,6 +79,7 @@ export function renderHome(main, { onNew }) {
     value: f.text, autocomplete: "off", enterkeyhint: "search" });
   const sortSelect = h("select", { id: "sort" }, SORTS.map((s) => h("option", { value: s, text: `Tri : ${s[0].toLowerCase()}${s.slice(1)}`, selected: s === f.sort })));
   const chips = h("div", { class: "chips", role: "group", "aria-label": "Catégories" });
+  const tagRow = h("div", { class: "chips tag-chips", role: "group", "aria-label": "Étiquettes" });
   const list = h("div", { class: "grid", id: "recipe-list" });
   const empty = h("div", { class: "empty" });
 
@@ -93,7 +95,7 @@ export function renderHome(main, { onNew }) {
         h("div", { class: "search-box" }, icon("search", 20),
           h("label", { class: "sr-only", for: "q", text: "Rechercher" }), searchInput),
         h("div", { class: "sort-box" }, h("label", { class: "sr-only", for: "sort", text: "Trier" }), sortSelect)),
-      chips, list, empty));
+      chips, tagRow, list, empty));
 
   function draw() {
     const all = allRecipes();
@@ -105,8 +107,20 @@ export function renderHome(main, { onNew }) {
       onClick: () => { f.category = value; draw(); }, text: label,
     })));
 
+    const counts = tagCounts(all);
+    f.tags = (f.tags || []).filter((t) => counts.some((c) => fold(c.tag) === fold(t)));  // a deleted tag cannot stay selected
+    clear(tagRow);
+    tagRow.hidden = !counts.length;
+    tagRow.append(...counts.map(({ tag, n }) => {
+      const on = f.tags.some((t) => fold(t) === fold(tag));
+      return h("button", {
+        class: `chip chip-btn chip-tag${on ? " is-on" : ""}`, type: "button", "aria-pressed": String(on),
+        onClick: () => { f.tags = on ? f.tags.filter((t) => fold(t) !== fold(tag)) : [...f.tags, tag]; draw(); },
+      }, `#${tag}`, h("span", { class: "chip-count", text: ` ${n}` }));
+    }));
+
     const shown = search(all, f, f.sort);
-    const filtered = !!(f.text.trim() || f.category);
+    const filtered = !!(f.text.trim() || f.category || f.tags.length);
     if (!filtered) {
       eyebrow.textContent = `${greeting()} !`.toUpperCase();
       title.textContent = "Qu'est-ce qu'on cuisine ?";
@@ -129,9 +143,9 @@ export function renderHome(main, { onNew }) {
           h("p", { class: "muted", text: "Touchez l'étoile d'une recette pour la retrouver ici." }));
       } else {
         empty.append(h("h2", { class: "serif", text: "Aucune recette ne correspond" }),
-          h("p", { class: "muted", text: "Essayez un autre mot, ou changez de catégorie." }),
+          h("p", { class: "muted", text: "Essayez un autre mot, ou changez de catégorie ou d'étiquette." }),
           h("button", { class: "btn btn-secondary", type: "button",
-            onClick: () => { f.text = ""; f.category = ""; searchInput.value = ""; draw(); }, text: "Effacer la recherche" }));
+            onClick: () => { f.text = ""; f.category = ""; f.tags = []; searchInput.value = ""; draw(); }, text: "Effacer la recherche" }));
       }
     }
   }

@@ -1,5 +1,5 @@
 from mamarmiton.models import Ingredient, Recipe
-from mamarmiton.search import Filters, parse_ingredient_query, search
+from mamarmiton.search import Filters, parse_ingredient_query, search, tag_counts
 
 RECIPES = [
     Recipe(nom="Gâteau au chocolat", temps=20, temps_cuisson=25, type_plat="Dessert", type_cuisson="Four",
@@ -39,3 +39,17 @@ def test_sorting():
 
 def test_parse_ingredient_query():
     assert parse_ingredient_query("farine, oeufs\nbeurre: 100 g") == ["farine", "oeufs", "beurre"]
+
+
+def test_tags_filter_needs_all_and_ignores_accents():
+    a, b = RECIPES[0], RECIPES[1]
+    a.tags, b.tags = ["Noël", "rapide"], ["rapide"]
+    try:
+        assert names(Filters(tags=["rapide"])) == ["Gâteau au chocolat", "Quiche lorraine"]
+        assert names(Filters(tags=["NOEL", "Rapide"])) == ["Gâteau au chocolat"]
+        assert names(Filters(tags=["inconnu"])) == []
+        assert not Filters(tags=["rapide"]).is_empty()
+        assert names(Filters(text="noel")) == ["Gâteau au chocolat"]  # free text finds tags too
+        assert tag_counts(RECIPES) == [("rapide", 2), ("Noël", 1)]
+    finally:
+        a.tags, b.tags = [], []

@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 import customtkinter as ctk
 
-from mamarmiton.models import COOKING_TYPES, Recipe
+from mamarmiton.models import COOKING_TYPES, Recipe, fold
 from mamarmiton.search import SORTS, TIME_LIMITS, Filters, parse_ingredient_query
 from mamarmiton.ui import art, theme
-from mamarmiton.ui.widgets import RecipeCard, ScrollFrame
+from mamarmiton.ui.widgets import FlowFrame, RecipeCard, ScrollFrame
 
 if TYPE_CHECKING:
     from mamarmiton.ui.app import App
@@ -136,6 +136,8 @@ class HomeView(ctk.CTkFrame):
                                            compound="left", command=self.app.reset_filters)
         self.m_sort = theme.pill_menu(pills, list(SORT_LABELS), width=210, command=lambda _v: self._sort_changed())
         self._clear_shown = False
+        self.tags: list[str] = []  # tag filters picked in the sidebar, shown as removable chips
+        self.tag_flow = FlowFrame(bar)
         self._tight: bool | None = None
         self.clear_filters(silent=True)
         saved = next((label for label, key in SORT_LABELS.items() if key == app.settings.sort), None)
@@ -156,6 +158,7 @@ class HomeView(ctk.CTkFrame):
             type_cuisson=None if cuisson == ALL_COOKING else cuisson,
             max_minutes=TIME_LIMITS.get(TIME_LABELS.get(self.m_temps.get(), "")),
             ingredients=parse_ingredient_query(self.ingredients.get()),
+            tags=list(self.tags),
         )
 
     def sort(self) -> str:
@@ -166,11 +169,33 @@ class HomeView(ctk.CTkFrame):
             box.set("")
         self.m_cuisson.set(ALL_COOKING)
         self.m_temps.set(ANY_TIME)
+        self.tags = []
         if self._debounce:
             self.after_cancel(self._debounce)
             self._debounce = None
         if not silent:
             self._changed()
+
+    def toggle_tag(self, tag: str) -> None:
+        key = fold(tag)
+        if any(fold(t) == key for t in self.tags):
+            self.tags = [t for t in self.tags if fold(t) != key]
+        else:
+            self.tags.append(tag)
+
+    def _show_tag_chips(self) -> None:
+        chips = []
+        for tag in self.tags:
+            label = tag if len(tag) <= 24 else tag[:23] + "…"
+            chips.append(ctk.CTkButton(
+                self.tag_flow, text=f"{label}   ✕", height=30, width=0, corner_radius=15, font=theme.font(13, "bold"),
+                fg_color=theme.ACCENT_SOFT, hover_color=theme.BORDER, text_color=theme.ACCENT_TEXT,
+                command=lambda t=tag: self.app.toggle_tag(t)))
+        if chips:
+            self.tag_flow.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        else:
+            self.tag_flow.grid_forget()
+        self.tag_flow.set_items(chips)
 
     def _schedule(self) -> None:
         if self._debounce:
@@ -201,6 +226,7 @@ class HomeView(ctk.CTkFrame):
         n = len(recipes)
         self.count.configure(text=f"{n} recette{'s' if n > 1 else ''}" if total else "")
 
+        self._show_tag_chips()
         has_filters = not self.filters().is_empty()
         if has_filters != self._clear_shown:
             self._clear_shown = has_filters
