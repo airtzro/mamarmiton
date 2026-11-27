@@ -35,6 +35,8 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
+from mamarmiton import tls
+
 log = logging.getLogger(__name__)
 
 API_URL = "https://api.github.com/repos/airtzro/mamarmiton/releases/latest"
@@ -129,7 +131,7 @@ def fetch_latest(current_version: str, timeout: float = 5) -> UpdateInfo | None:
     """Ask GitHub for the latest release: None when this version is the latest. Raises when offline."""
     req = urllib.request.Request(api_url(), headers={"User-Agent": USER_AGENT,
                                                      "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=tls.context()) as resp:
         data = json.loads(resp.read(1_000_000).decode("utf-8"))
     return parse_release(data, current_version)
 
@@ -222,7 +224,7 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def _open(url: str, timeout: float):
-    opener = urllib.request.build_opener(_SafeRedirects)
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=tls.context()), _SafeRedirects)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/octet-stream"})
     return opener.open(req, timeout=timeout)
 

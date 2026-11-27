@@ -330,7 +330,8 @@ class HelpDialog(Modal):
             self.close()
             app.show_update(info, force=True)
 
-        def failed(_exc) -> None:
+        def failed(exc) -> None:
+            log.warning("Update check failed: %r", exc)
             self.update_button.configure(state="normal")
             self.update_status.configure(text="Impossible de vérifier pour l'instant. Vérifiez la connexion à "
                                          "internet.", text_color=theme.DANGER)
