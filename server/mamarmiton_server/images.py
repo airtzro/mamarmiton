@@ -15,6 +15,15 @@ MAX_SIDE = 2560  # plenty for a recipe photo, keeps the NAS tidy
 Image.MAX_IMAGE_PIXELS = 80_000_000  # refuse "decompression bombs" (tiny files that expand to huge images)
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF", "BMP", "MPO"}  # MPO: some cameras' JPEGs
 
+try:  # iPhone photos (HEIC); optional, so a platform without the wheel still runs
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+    HEIF_SUPPORTED = True
+    ALLOWED_FORMATS.add("HEIF")
+except Exception:  # ImportError, or a broken native library
+    HEIF_SUPPORTED = False
+
 
 class BadImage(ValueError):
     pass

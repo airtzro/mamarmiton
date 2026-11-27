@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from mamarmiton.models import Recipe
 from mamarmiton.redact import redact
-from mamarmiton_server import __version__, admin, db, images, security, usage
+from mamarmiton_server import __version__, admin, db, images, importer, security, usage
 from mamarmiton_server.config import Settings
 
 log = logging.getLogger(__name__)
@@ -47,16 +47,21 @@ class BodyLimitMiddleware:
     def __init__(self, app, settings: Settings):
         self.app = app
         self.image_limit = (settings.max_image_mb + 1) * 1024 * 1024
+        # the files themselves are checked against import_max_mb; +1 MB for the form around them
+        self.import_limit = (settings.import_max_mb + 1) * 1024 * 1024
+        self.import_message = json.dumps(
+            {"detail": f"Fichiers trop lourds : {settings.import_max_mb} Mo au maximum en tout."}).encode()
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         is_upload = scope["method"] == "POST" and scope["path"].endswith("/images")
-        limit = self.image_limit if is_upload else MAX_JSON_BODY
+        is_import = scope["method"] == "POST" and scope["path"] == "/import/recipe"
+        limit = self.import_limit if is_import else self.image_limit if is_upload else MAX_JSON_BODY
         started = False
 
         async def too_large():
-            body = b'{"detail":"Requ\xc3\xaate trop volumineuse."}'
+            body = self.import_message if is_import else b'{"detail":"Requ\xc3\xaate trop volumineuse."}'
             await send({"type": "http.response.start", "status": 413,
                         "headers": [(b"content-type", b"application/json"), (b"connection", b"close"),
                                     (b"content-length", str(len(body)).encode())]})
@@ -775,6 +780,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if rows:
             usage.record(conn, usage.client_kind(body.client), rows)
         return {"accepted": len(rows)}
+
+    # ------------------------------------------------------ import automatique
+    importer.register(app, settings, Session)
 
     @app.post("/reports", status_code=201)
     def post_report(body: ReportBody, user: Session, conn: Conn) -> dict:

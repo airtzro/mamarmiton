@@ -52,14 +52,16 @@ Réponse :
 {{"nom": "Crêpes", "temps": 10, "temps_cuisson": 20, "pour": 4, "type_plat": "Dessert", "type_cuisson": "Poêle", "ingredients": [{{"nom": "farine", "quantité": "250 g"}}, {{"nom": "oeufs", "quantité": "4"}}, {{"nom": "lait", "quantité": "50 cl"}}, {{"nom": "sel", "quantité": "1 pincée"}}], "etapes": ["Mélange la farine et les oeufs.", "Ajoute le lait petit à petit.", "Fais cuire à la poêle."]}}"""
 
 
-def is_available() -> bool:
-    if config.find_model() is None:
-        return False
+def llama_cpp_installed() -> bool:
     try:
         import llama_cpp  # noqa: F401
     except Exception:  # ImportError, or a broken native library
         return False
     return True
+
+
+def is_available() -> bool:
+    return config.find_model() is not None and llama_cpp_installed()
 
 
 def extract_json(raw: str) -> dict | None:
@@ -94,42 +96,51 @@ def extract_json(raw: str) -> dict | None:
     return None
 
 
-def parse_recipe_with_llm(text: str, model_path: Path | None = None) -> dict | None:
+def load_model(model_path: Path, n_threads: int | None = None):
+    """Load the GGUF model (takes a few seconds and about 1 GB of memory)."""
     from llama_cpp import Llama
 
-    model_path = model_path or config.find_model()
-    if model_path is None:
-        return None
-    text = text[:MAX_INPUT_CHARS]
-
-    llm = Llama(
+    return Llama(
         model_path=str(model_path),
         n_ctx=N_CTX,
-        n_threads=max(1, (os.cpu_count() or 2) - 1),
+        n_threads=n_threads or max(1, (os.cpu_count() or 2) - 1),
         n_gpu_layers=0,
         verbose=False,
     )
+
+
+def ask_model(llm, text: str) -> dict | None:
+    """The recipe JSON the loaded model reads in ``text`` (cut to ``MAX_INPUT_CHARS``), or None."""
+    text = text[:MAX_INPUT_CHARS]
+    kwargs = dict(
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Texte de la recette :\n\"\"\"\n{text}\n\"\"\""},
+        ],
+        max_tokens=1200,
+        temperature=0.1,
+        repeat_penalty=1.15,
+    )
     try:
-        kwargs = dict(
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Texte de la recette :\n\"\"\"\n{text}\n\"\"\""},
-            ],
-            max_tokens=1200,
-            temperature=0.1,
-            repeat_penalty=1.15,
-        )
-        try:
-            output = llm.create_chat_completion(response_format={"type": "json_object"}, **kwargs)
-        except Exception:  # older llama-cpp builds without JSON grammar support
-            log.info("JSON mode unavailable, retrying without it")
-            output = llm.create_chat_completion(**kwargs)
-        raw = output["choices"][0]["message"]["content"] or ""
-        log.debug("LLM raw output: %s", raw)
-        data = extract_json(raw)
-        if data is None:
-            log.warning("LLM answer was not valid JSON")
-        return data
-    finally:
+        output = llm.create_chat_completion(response_format={"type": "json_object"}, **kwargs)
+    except Exception:  # older llama-cpp builds without JSON grammar support
+        log.info("JSON mode unavailable, retrying without it")
+        output = llm.create_chat_completion(**kwargs)
+    raw = output["choices"][0]["message"]["content"] or ""
+    log.debug("LLM raw output: %s", raw)
+    data = extract_json(raw)
+    if data is None:
+        log.warning("LLM answer was not valid JSON")
+    return data
+
+
+def parse_recipe_with_llm(text: str, model_path: Path | None = None) -> dict | None:
+    model_path = model_path or config.find_model()
+    if model_path is None:
+        return None
+    llm = load_model(model_path)
+    try:
+        return ask_model(llm, text)
+    finally:  # the desktop frees the memory between imports
         del llm
         gc.collect()
