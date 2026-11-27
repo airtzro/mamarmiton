@@ -49,4 +49,4 @@ jobs:
         working-directory: server
         run: python -m pytest -q
       - name: Test (desktop client against a real server)
-        run: python -m pytest -q tests/test_remote.py
+        run: python -m pytest -q tests/test_remote.py tests/test_undo_remote.py tests/test_sync_integrity.py
