@@ -206,4 +206,4 @@ def test_closing_the_window_asks_before_dropping_unsaved_edits(app, monkeypatch)
     monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
     app._quit()
     with pytest.raises(tkinter.TclError):
-        app.update()  # the window is gone
+        app.winfo_exists()  # the window is gone
