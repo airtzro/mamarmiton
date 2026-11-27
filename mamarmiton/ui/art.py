@@ -180,6 +180,15 @@ def _draw_icon(name: str, color: str) -> Image.Image:
     elif name == "copy":
         d.rounded_rectangle(box(8, 8, 20, 20), radius=2.5 * s, outline=c, width=w)
         _stroke(d, pts((16, 8), (16, 5), (4, 5), (4, 16), (8, 16)), w, c)
+    elif name == "cart":
+        _stroke(d, pts((3, 5), (6, 5), (8, 16), (18, 16), (20.5, 8), (6.5, 8)), w, c)
+        for x in (9.5, 16.5):
+            r = 1.7 * s
+            d.ellipse((x * s - r, 19.8 * s - r, x * s + r, 19.8 * s + r), fill=c)
+    elif name == "printer":
+        d.rounded_rectangle(box(3, 9, 21, 18), radius=2.5 * s, outline=c, width=w)
+        _stroke(d, pts((7, 9), (7, 4), (17, 4), (17, 9)), w, c)
+        d.rounded_rectangle(box(7, 14, 17, 21), radius=1 * s, outline=c, width=w)
     elif name == "close":
         _stroke(d, pts((6, 6), (18, 18)), w, c)
         _stroke(d, pts((18, 6), (6, 18)), w, c)

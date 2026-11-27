@@ -32,7 +32,7 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 |---|---|---|
 | **Import from a recipe website URL** | Most sites (Marmiton, 750g, Cuisine AZ…) embed `schema.org/Recipe` JSON-LD. Parsing it is reliable and needs no AI. | M |
 | **Import from a photo** (phone picture of a handwritten or book recipe) | OCR, then the same AI/rules pipeline as PDFs. | M |
-| **Shopping list** | Tick recipes plus servings, get a merged list grouped by aisle, then print it or copy it to the phone. Needs unit normalisation (g/kg, cl/l), which `quantities.py` already half does. | M |
+| ~~**Shopping list**~~ (done) | Tick recipes plus servings, get a merged list grouped by aisle, then print it or copy it to the phone. Needs unit normalisation (g/kg, cl/l), which `quantities.py` already half does. | M |
 | **Weekly meal planner** | A Monday-to-Sunday grid where you drop recipes in; feeds the shopping list. | M |
 | **Rating & "cooked on" history** | ★1–5 plus the dates it was made. Sort by "pas faite depuis longtemps". | S–M |
 | **Better AI** | Offer Qwen 2.5 3B for PCs with 8 GB+ RAM, keep the model loaded between imports, and add a "re-run the AI" button on the review screen. Possibly use a JSON-schema grammar instead of plain JSON mode. | M |
