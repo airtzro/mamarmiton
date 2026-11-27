@@ -98,3 +98,42 @@ def test_api_routes_are_unaffected(client):
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404
     assert "content-security-policy" not in client.get("/health").headers
+
+
+def test_service_worker_is_served_with_whole_site_scope(client):
+    from mamarmiton_server import __version__
+    r = client.get("/app/sw.js")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/javascript")
+    assert r.headers["service-worker-allowed"] == "/"
+    assert r.headers["cache-control"] == "no-cache"
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert "__VERSION__" not in r.text and f'"{__version__}"' in r.text
+    assert client.head("/app/sw.js").status_code == 200
+
+
+def test_service_worker_does_not_touch_the_api_or_cache_tokens(client):
+    code = client.get("/app/sw.js").text
+    assert "Authorization" not in code and "/auth/" not in code
+    # only the shell and the photo URLs are handled
+    assert "PHOTO_PATH" in code and 'startsWith("/app/")' in code
+
+
+def test_service_worker_precaches_only_files_the_server_serves(client):
+    import re
+    code = client.get("/app/sw.js").text
+    block = code.split("const SHELL = [", 1)[1].split("];", 1)[0]
+    urls = re.findall(r'"(/[^"]*)"', block)
+    assert "/" in urls and "/app/offline.js" in urls
+    for url in urls:
+        assert client.get(url).status_code == 200, url
+    # every script and the stylesheet of the page must be precached
+    for js in WEB_DIR.glob("*.js"):
+        if js.name != "sw.js":
+            assert f"/app/{js.name}" in urls, js.name
+
+
+def test_csp_needs_no_change_for_the_service_worker(client):
+    csp = client.get("/").headers["content-security-policy"]
+    assert "script-src 'self'" in csp and "unsafe-inline" not in csp
+    assert "worker-src" not in csp  # falls back to script-src 'self'

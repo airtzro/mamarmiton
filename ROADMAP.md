@@ -7,7 +7,7 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 
 | Feature | Why | Effort |
 |---|---|---|
-| **Web offline cache** | The web page needs a connection today. Cache recipes the way the desktop app does. | M |
+| ~~**Web offline cache**~~ | **Done**: service worker (page and photos), recipes and unsent edits kept in IndexedDB, "Hors ligne" badge, conflicts keep both versions. | ~~M~~ |
 | **Real-phone testing of the web page** | Check login, sync, sharing and add-to-home-screen on a real iPhone and Android phone. | S |
 | **PDF import on the web** | The web version cannot import PDFs yet. | M |
 | **Permanent router rule for port 443** | Public port 443 is not forwarded yet, so the web address needs a port (51820 today). | S |

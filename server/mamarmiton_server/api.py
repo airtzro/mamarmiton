@@ -346,7 +346,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(WEB_DIR / "index.html", media_type="text/html; charset=utf-8", headers=WEB_PAGE_HEADERS)
 
     @app.api_route("/app/{asset_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
-    def web_asset(asset_path: str) -> FileResponse:
+    def web_asset(asset_path: str) -> Response:
+        if asset_path == "sw.js":
+            # the service worker lives under /app but controls the whole site (photos are under /recipes);
+            # the release number in it makes a new version replace the old shell cache
+            code = (WEB_DIR / "sw.js").read_text(encoding="utf-8").replace("__VERSION__", __version__)
+            return Response(code, media_type=WEB_TYPES[".js"], headers={
+                **WEB_COMMON_HEADERS, "Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
         path = _web_file(asset_path)
         if path is None:
             raise _error(404, "Page introuvable.")

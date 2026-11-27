@@ -1,7 +1,7 @@
 import { api, token } from "./api.js";
 import { h, icon, clear } from "./dom.js";
-import { state } from "./state.js";
-import { busy, openDialog, toast } from "./ui.js";
+import { pendingCount, state } from "./state.js";
+import { busy, confirmDialog, openDialog, toast } from "./ui.js";
 
 function field(label, input) {
   const id = `a-${Math.random().toString(36).slice(2, 8)}`;
@@ -19,6 +19,11 @@ export function openAccountDialog({ onSignOut }) {
       function home() {
         const signOut = h("button", { class: "btn btn-secondary btn-big", type: "button" }, icon("logout", 20), "Se déconnecter");
         signOut.addEventListener("click", async () => {
+          if (pendingCount > 0) {
+            const ok = await confirmDialog({ title: "Modifications non envoyées", danger: true, confirmText: "Me déconnecter quand même",
+              cancelText: "Rester connecté", message: `${pendingCount} modification${pendingCount > 1 ? "s" : ""} faite${pendingCount > 1 ? "s" : ""} hors ligne ne ${pendingCount > 1 ? "sont" : "est"} pas encore envoyée${pendingCount > 1 ? "s" : ""} et sera perdue.` });
+            if (!ok) return;
+          }
           await busy(signOut, async () => { try { await api.logout(); } catch { /* the token is dropped anyway */ } });
           close();
           onSignOut();

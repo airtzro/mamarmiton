@@ -9,6 +9,14 @@ export function toast(message, kind = "info") {
   setTimeout(() => el.remove(), kind === "error" ? 7000 : 3500);
 }
 
+/** The small "Hors ligne" badge, with the number of edits waiting to be sent. */
+export function setOffline(offline, pending = 0) {
+  const el = document.getElementById("offline-badge");
+  const waiting = pending ? ` · ${pending} modification${pending > 1 ? "s" : ""} en attente` : "";
+  el.textContent = offline ? `Hors ligne${waiting}` : (pending ? `${pending} modification${pending > 1 ? "s" : ""} en attente d'envoi` : "");
+  el.hidden = !el.textContent;
+}
+
 export function setBanner(text) {
   const el = document.getElementById("banner");
   el.textContent = text || "";
