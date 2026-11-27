@@ -133,3 +133,27 @@ def test_favorite_star_on_home_keeps_scroll_position(app):
     app.toggle_favorite(target)
     _pump(app, 10)
     assert canvas.yview()[0] > 0.2
+
+
+def test_flowframe_does_not_leak_replaced_chips(app):
+    import time
+    for _ in range(5):
+        app.toggle_tag("Noël")
+        _pump(app)
+    flow = app.home.tag_flow
+    time.sleep(0.4)
+    _pump(app, 10)
+    assert len(flow.winfo_children()) == len(flow.items) <= 1
+
+
+def test_editor_suggestions_do_not_leak(app):
+    app.new_recipe()
+    _pump(app)
+    import time
+    for ch in "No":
+        app.editor.e_tag.insert("end", ch)
+        app.editor._tag_typed()
+    time.sleep(0.4)
+    _pump(app, 10)
+    flow = app.editor.tag_suggestions
+    assert len(flow.winfo_children()) == len(flow.items)
