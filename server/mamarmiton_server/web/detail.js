@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { hit } from "./usage.js";
 import { h, icon, clear } from "./dom.js";
 import { canEdit, deleteRecipe, displayName, getRecipe, photos, state, sync } from "./state.js";
 import { frac, scaleQuantity } from "./quantities.js";
@@ -43,13 +44,14 @@ async function addPhotos(recipe, files, button) {
     for (const file of files) {
       try { await api.uploadImage(recipe.id, file); done++; } catch (e) { toast(e.message, "error"); }
     }
-    if (done) { await sync().catch(() => {}); toast(done > 1 ? "Photos ajoutées." : "Photo ajoutée.", "ok"); }
+    if (done) { hit("photo_add"); await sync().catch(() => {}); toast(done > 1 ? "Photos ajoutées." : "Photo ajoutée.", "ok"); }
   });
 }
 
 /** Renders one recipe. Returns {update()} to redraw after a sync (servings are kept). */
 export function renderDetail(main, id, { onEdit, onGone, onChange }) {
   let recipe = getRecipe(id);
+  if (recipe) hit("recipe_open");  // once per opening, not per redraw
   const checked = new Set();   // ticked ingredients and finished steps (not saved)
   const done = new Set();
 
@@ -65,11 +67,12 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
       onClick: () => toggleFavorite(recipe, onChange) }, icon(recipe.favori ? "star-filled" : "star", 20),
     h("span", { class: "btn-label", text: recipe.favori ? "Dans mes favoris" : "Ajouter aux favoris" }));
     const cookBtn = h("button", { class: "btn btn-secondary", type: "button",
-      onClick: () => openKitchen(recipe, { servings: servingsMemo.get(id) ?? recipe.pour }) },
+      onClick: () => hit("kitchen_open") || openKitchen(recipe, { servings: servingsMemo.get(id) ?? recipe.pour }) },
     icon("chef", 20), h("span", { class: "btn-label", text: "Mode cuisine" }));
     const inList = servingsInList(id);
     const shopBtn = h("button", { class: "btn btn-secondary", type: "button", onClick: () => {
       const n = servingsMemo.get(id) ?? recipe.pour;
+      hit("shopping_add");
       addRecipeToShopping(recipe, n);
       toast(`Ajouté aux courses pour ${n} personne${n > 1 ? "s" : ""}.`, "ok");
       draw();
@@ -93,6 +96,7 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
         await busy(del, async () => {
           try {
             const { queued } = await deleteRecipe(id);
+            hit("recipe_delete");
             servingsMemo.delete(id);
             toast(queued ? "Recette supprimée sur cet appareil. Elle le sera partout au retour de la connexion." : "Recette supprimée.", "ok");
             location.hash = "#/";
@@ -142,7 +146,7 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
       recipe.tags.length
         ? h("p", { class: "tag-list" }, recipe.tags.map((tag) => h("button", {
           class: "chip chip-btn chip-tag", type: "button", title: `Voir les recettes « ${tag} »`,
-          onClick: () => { state.filters.text = ""; state.filters.category = ""; state.filters.tags = [tag]; location.hash = "#/"; },
+          onClick: () => { state.filters.text = ""; state.filters.category = ""; state.filters.tags = [tag]; hit("tag_filter"); location.hash = "#/"; },
           text: `#${tag}` })))
         : null,
       h("h1", { class: "serif", text: recipe.nom }),

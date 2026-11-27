@@ -173,6 +173,15 @@ class ApiClient:
         """Admin only. Returns ``{code, expires_at, note}``."""
         return self._request("POST", "/invites", json={"note": note})
 
+    # ----------------------------------------------------- usage, reports
+    def send_usage(self, client_id: str, days: dict) -> None:
+        """Anonymous counters: ``{"2026-11-27": {"recipe_open": 3}}`` (see ``mamarmiton.usage``)."""
+        self._request("POST", "/usage", json={"client": client_id, "days": days})
+
+    def send_report(self, report: dict) -> None:
+        """"Signaler un problème": ``{message, client, app_version, os, log_tail}``."""
+        self._request("POST", "/reports", json=report)
+
     # ------------------------------------------------------------- recipes
     def list_recipes(self, since: int = 0) -> dict:
         """``{seq, recipes: [...], visible_ids, favorites}`` for changes after ``since``."""

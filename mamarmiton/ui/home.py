@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import customtkinter as ctk
 
+from mamarmiton import usage
 from mamarmiton.models import COOKING_TYPES, Recipe, fold
 from mamarmiton.search import SORTS, TIME_LIMITS, Filters, parse_ingredient_query
 from mamarmiton.ui import art, theme
@@ -200,10 +201,15 @@ class HomeView(ctk.CTkFrame):
     def _schedule(self) -> None:
         if self._debounce:
             self.after_cancel(self._debounce)
+        self._typed = True
         self._debounce = self.after(220, self._changed)
 
     def _changed(self) -> None:
         self._debounce = None
+        if getattr(self, "_typed", False):  # a search typed, then paused: one use of the search box
+            self._typed = False
+            if self.search.get().strip() or self.ingredients.get().strip():
+                usage.hit("search")
         if self.app.current not in (self, None):  # typed, then left for a recipe: do not drag them back
             return
         self.app.go_home()

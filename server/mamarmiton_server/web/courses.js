@@ -4,6 +4,7 @@
 import { h, icon, clear } from "./dom.js";
 import { getRecipe, state } from "./state.js";
 import { confirmDialog, toast } from "./ui.js";
+import { hit } from "./usage.js";
 import {
   addExtra, addRecipe, buildList, groupByAisle, newState, prune, removeRecipe, servingsOf, setChecked, stateFromDict,
   stateToDict, toText, clearState, itemLabel,
@@ -63,6 +64,7 @@ async function copyText(text) {
 }
 
 export function renderCourses(main) {
+  hit("shopping_open");
   const list = loadShopping();
   const listBox = h("div", { class: "stack courses-list" });
   const input = h("input", { type: "text", id: "extra-item", class: "grow", autocomplete: "off", placeholder: "Ajouter un article (papier absorbant…)", "aria-label": "Nouvel article" });
@@ -77,10 +79,12 @@ export function renderCourses(main) {
     return toText(items, list.checked, list.extras);
   };
   const copyBtn = h("button", { class: "btn btn-secondary", type: "button", onClick: async () => {
+    hit("shopping_copy_or_print");
     const ok = await copyText(currentText());
     toast(ok ? "Liste copiée." : "Impossible de copier la liste.", ok ? "ok" : "error");
   } }, icon("copy", 20), h("span", { class: "btn-label", text: "Copier" }));
   const shareBtn = h("button", { class: "btn btn-secondary", type: "button", onClick: async () => {
+    hit("shopping_copy_or_print");
     const text = currentText();
     if (typeof navigator.share === "function") {
       try { await navigator.share({ title: "Liste de courses", text }); return; } catch (e) { if (e && e.name === "AbortError") return; }

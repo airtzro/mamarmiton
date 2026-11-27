@@ -9,6 +9,8 @@
     python -m mamarmiton_server restore-check <snapshot>
     python -m mamarmiton_server restore <snapshot> --into /data [--force]
     python -m mamarmiton_server migrate [--dry-run]
+    python -m mamarmiton_server usage [--days 56]             # which features are used (anonymous counters)
+    python -m mamarmiton_server reports [--all]               # "Signaler un problème" messages, marks them read
 
 In Docker: ``docker compose exec api python -m mamarmiton_server invite``.
 """
@@ -18,7 +20,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from mamarmiton_server import db, security
 from mamarmiton_server.config import Settings
@@ -41,6 +43,61 @@ def _ask_password(username: str, from_stdin: bool = False) -> str:
             print("Les deux mots de passe sont différents.")
             continue
         return first
+
+
+def usage_table(conn, days: int = 56, today: date | None = None) -> str:
+    """Events x weeks, least used first. Weeks end today (the last column is the current 7 days)."""
+    from mamarmiton_server import usage
+
+    today = today or date.today()
+    days = max(7, days)
+    weeks = (days + 6) // 7
+    start = today - timedelta(days=weeks * 7 - 1)
+    totals: dict[str, list[int]] = {e: [0] * weeks for e in usage.EVENTS}
+    used_days: dict[str, set[str]] = {e: set() for e in usage.EVENTS}
+    active = {kind: [0] * weeks for kind in (*usage.KINDS, "other")}
+    for row in conn.execute("SELECT day, client_kind, event, count FROM usage_daily WHERE day >= ? AND day <= ?",
+                            (start.isoformat(), today.isoformat())):
+        week = (date.fromisoformat(row["day"]) - start).days // 7
+        if row["event"] == usage.ACTIVE:
+            active.setdefault(row["client_kind"], [0] * weeks)[week] += row["count"]
+        elif row["event"] in totals:
+            totals[row["event"]][week] += row["count"]
+            used_days[row["event"]].add(row["day"])
+    heads = [(start + timedelta(days=7 * w)).strftime("%d/%m") for w in range(weeks)]
+    name_w = max(len(e) for e in usage.EVENTS)
+    lines = [f"Usage du {start:%d/%m/%Y} au {today:%d/%m/%Y} (semaines qui commencent le jour indiqué)", "",
+             f"{'événement':<{name_w}}  " + " ".join(f"{h:>6}" for h in heads) + "   total  jours"]
+    order = sorted(usage.EVENTS, key=lambda e: (sum(totals[e]), len(used_days[e]), e))
+    for event in order:
+        lines.append(f"{event:<{name_w}}  " + " ".join(f"{n:>6}" for n in totals[event])
+                     + f"  {sum(totals[event]):>6}  {len(used_days[event]):>5}")
+    lines += ["", "Appareils actifs (appareil-jours) :"]
+    for kind, counts in active.items():
+        if any(counts) or kind in usage.KINDS:
+            lines.append(f"{'actifs ' + kind:<{name_w}}  " + " ".join(f"{n:>6}" for n in counts)
+                         + f"  {sum(counts):>6}")
+    return "\n".join(lines)
+
+
+def reports_text(conn, show_all: bool = False) -> str:
+    """Unread problem reports (and the read ones with ``show_all``); everything shown is marked read."""
+    where = "" if show_all else "WHERE r.read_at IS NULL"
+    rows = conn.execute("SELECT r.*, u.username FROM reports r JOIN users u ON u.id = r.user_id "
+                        f"{where} ORDER BY r.id").fetchall()
+    if not rows:
+        return "Aucun message." if show_all else "Aucun nouveau message."
+    out = []
+    for r in rows:
+        flag = "" if r["read_at"] is None else "  (déjà lu)"
+        out.append(f"=== #{r['id']}  {r['created_at'][:16].replace('T', ' ')}  @{r['username']}  "
+                   f"{r['client']} {r['app_version']}  {r['os']}{flag}\n{r['message']}")
+        if r["log_tail"]:
+            tail = r["log_tail"].splitlines()
+            out.append(f"--- journal ({len(tail)} lignes) ---\n" + "\n".join(tail))
+    conn.execute(f"UPDATE reports SET read_at = ? WHERE read_at IS NULL AND id IN ({','.join('?' * len(rows))})",
+                 (db.now(), *[r["id"] for r in rows]))
+    return "\n\n".join(out)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -72,6 +129,10 @@ def main(argv: list[str] | None = None) -> int:
     rest.add_argument("--force", action="store_true", help="replace a non-empty directory (old content is kept aside)")
     mig = sub.add_parser("migrate", help="upgrade the database schema (done automatically at startup)")
     mig.add_argument("--dry-run", action="store_true", help="only say what would be done")
+    use = sub.add_parser("usage", help="feature usage by week, least used first")
+    use.add_argument("--days", type=int, default=56, help="length of the period (default 56 = 8 weeks)")
+    rep = sub.add_parser("reports", help="show unread problem reports and mark them read")
+    rep.add_argument("--all", action="store_true", help="also show the ones already read")
     args = parser.parse_args(argv)
 
     import logging
@@ -163,6 +224,10 @@ def _run(args) -> int:
             dest = Path(args.destination)
             db.backup_to(conn, dest)
             print(f"Base copiée dans {dest}. Les photos sont dans {settings.images_dir}.")
+        elif args.command == "usage":
+            print(usage_table(conn, args.days))
+        elif args.command == "reports":
+            print(reports_text(conn, args.all))
         elif args.command == "users":
             for row in conn.execute("SELECT u.username, u.display_name, u.is_admin, u.created_at, "
                                     "(SELECT COUNT(*) FROM recipes r WHERE r.owner_id = u.id AND r.deleted = 0) AS n "

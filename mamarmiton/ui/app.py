@@ -15,7 +15,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from mamarmiton import APP_NAME, __version__, config, updates
+from mamarmiton import APP_NAME, __version__, config, updates, usage
 from mamarmiton.importers import ImportResult
 from mamarmiton.models import DISH_TYPES, Recipe, fold
 from mamarmiton.search import Filters, search, tag_counts
@@ -243,6 +243,7 @@ class Sidebar(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         self.settings = Settings.load()
+        usage.set_enabled(self.settings.share_usage)
         art.reset_tk_caches()  # a previous App (tests, restart) left images bound to its dead Tk root
         theme.font.cache_clear()
         theme.serif.cache_clear()
@@ -377,12 +378,14 @@ class App(ctk.CTk):
     def add_to_shopping(self, recipe: Recipe | None, servings: int) -> None:
         if recipe is None:
             return
+        usage.hit("shopping_add")
         self.shopping.add_recipe(recipe.id, servings)
         self.save_shopping()
 
     def show_shopping(self) -> None:
         if not self.can_leave_editor():
             return
+        usage.hit("shopping_open")
         self.shopping_view.show()
         self._switch(self.shopping_view)
 
@@ -391,6 +394,8 @@ class App(ctk.CTk):
         if not self.can_leave_editor():
             return
         self.home.toggle_tag(tag)
+        if any(fold(t) == fold(tag) for t in self.home.tags):  # added, not removed
+            usage.hit("tag_filter")
         self.go_home()
 
     def filter_by_tag(self, tag: str) -> None:
@@ -401,6 +406,7 @@ class App(ctk.CTk):
         self.sidebar.category = None
         self.sidebar._highlight()
         self.home.tags = [tag]
+        usage.hit("tag_filter")
         self.go_home()
 
     def reset_filters(self) -> None:
@@ -417,19 +423,23 @@ class App(ctk.CTk):
         if self.current is self.home:
             self.home.search.focus_set()
 
-    def open_recipe(self, recipe: Recipe) -> None:
+    def open_recipe(self, recipe: Recipe, count: bool = True) -> None:
         if not self.can_leave_editor():
             return
+        if count:
+            usage.hit("recipe_open")
         self.detail.show(recipe)
         self._switch(self.detail)
 
     # ------------------------------------------------- timers and kitchen mode
     def start_timer(self, label: str, seconds: int) -> None:
+        usage.hit("timer_start")
         self.timers.start(label, seconds)
 
     def open_kitchen(self, recipe: Recipe, servings: int | None = None) -> None:
         if self.kitchen is not None or not recipe.etapes:
             return
+        usage.hit("kitchen_open")
         self.kitchen = KitchenView(self, recipe, servings)
         self.timers.dock(True)
         keep_awake(True)
@@ -494,8 +504,9 @@ class App(ctk.CTk):
             return
         def save(recipe: Recipe) -> None:
             self.store.add(recipe)
+            usage.hit("recipe_create")
             self._mutated()
-            self.open_recipe(recipe)
+            self.open_recipe(recipe, count=False)
 
         self._open_editor(None, save)
 
@@ -511,8 +522,9 @@ class App(ctk.CTk):
             except PermissionError as exc:
                 self._denied(exc)
                 return self.leave_editor()
+            usage.hit("recipe_edit")
             self._mutated()
-            self.open_recipe(updated)
+            self.open_recipe(updated, count=False)
 
         self._open_editor(recipe, save)
 
@@ -525,6 +537,7 @@ class App(ctk.CTk):
         copy = self.store.duplicate(recipe.id)
         if copy is None:
             return
+        usage.hit("variant_create")
         self._mutated()
         self.edit_recipe(copy)
 
@@ -538,6 +551,7 @@ class App(ctk.CTk):
             return self._denied(exc)
         if trashed is None:
             return
+        usage.hit("recipe_delete")
         self._mutated()
         self.go_home()
         store = self.store
@@ -547,6 +561,7 @@ class App(ctk.CTk):
             if store is not self.store:  # the book was switched meanwhile
                 return store.purge(trashed)
             store.restore(trashed)
+            usage.hit("delete_undo")
             self._mutated()
             if self.current is self.home:  # never pull the user out of the editor they are typing in
                 self.go_home()
@@ -570,6 +585,7 @@ class App(ctk.CTk):
         if recipe is None:
             return
         self.store.toggle_favorite(recipe.id)
+        usage.hit("favorite_toggle")
         self._mutated()
         self.refresh(recipe)
 
@@ -580,6 +596,7 @@ class App(ctk.CTk):
                 self.store.add_image(recipe, path)
             except PermissionError as exc:
                 return self._denied(exc)
+            usage.hit("photo_add")
             self._mutated()
             self.refresh(recipe)
 
@@ -620,6 +637,7 @@ class App(ctk.CTk):
             messagebox.showerror("Impression impossible",
                                  f"Le PDF n'a pas pu être créé :\n{exc}", parent=self)
             return
+        usage.hit("pdf_export")
         try:
             export.open_file(Path(path))
         except Exception:
@@ -641,6 +659,7 @@ class App(ctk.CTk):
         UrlImportDialog(self, self._review_import)
 
     def _review_import(self, result: ImportResult) -> None:
+        usage.hit("url_import" if result.method == "site" else "pdf_import")
         if result.method == "site":
             notes = ["Recette lue depuis le site : vérifiez-la avant d'enregistrer."]
         else:
@@ -657,7 +676,7 @@ class App(ctk.CTk):
             self.store.save()
             self._mutated()
             self._cleanup_import(result)
-            self.open_recipe(recipe)
+            self.open_recipe(recipe, count=False)
 
         self._open_editor(result.recipe, save, title="Vérifier la recette importée", banner="\n".join(notes),
                           on_cancel=lambda: self._cleanup_import(result))
@@ -676,6 +695,7 @@ class App(ctk.CTk):
                                             initialfile="mes-recettes.json", filetypes=[("JSON", "*.json")])
         if path:
             self.store.export_to(Path(path))
+            usage.hit("backup_export")
             messagebox.showinfo("Export terminé", f"{len(self.store)} recettes exportées.", parent=self)
 
     def import_backup(self) -> None:
@@ -687,6 +707,7 @@ class App(ctk.CTk):
         except Exception as exc:
             messagebox.showerror("Import impossible", f"Fichier illisible :\n{exc}", parent=self)
             return
+        usage.hit("backup_import")
         self._mutated()
         messagebox.showinfo("Import terminé", f"{count} nouvelle(s) recette(s) ajoutée(s).", parent=self)
         self.go_home()
@@ -705,6 +726,11 @@ class App(ctk.CTk):
     def set_use_ai(self, value: bool) -> None:
         self.settings.use_ai = value
         self.settings.save()
+
+    def set_share_usage(self, value: bool) -> None:
+        self.settings.share_usage = value
+        self.settings.save()
+        usage.set_enabled(value)
 
     def set_check_updates(self, value: bool) -> None:
         self.settings.check_updates = value
@@ -741,8 +767,12 @@ class App(ctk.CTk):
             self.settings.snoozed_version = info.version
             self.settings.save()
 
+        def download() -> None:
+            usage.hit("update_banner_click")
+            webbrowser.open(info.url)
+
         self._update_banner = UpdateBanner(self, f"Une nouvelle version ({info.version}) est disponible",
-                                           lambda: webbrowser.open(info.url), later)
+                                           download, later)
 
     def show_upgrade_required(self) -> None:
         """The server refuses this version (426): say so once, without blocking the local recipes."""
@@ -753,6 +783,7 @@ class App(ctk.CTk):
         url = [updates.RELEASES_URL]
 
         def open_download() -> None:
+            usage.hit("update_banner_click")
             webbrowser.open(url[0])
 
         def forget() -> None:
@@ -900,6 +931,7 @@ class App(ctk.CTk):
             return
         for conflict in self.store.conflicts:
             if conflict.recipe_id not in self._snoozed:
+                usage.hit("sync_conflict_shown")
                 self._conflict_dialog = ConflictDialog(self, conflict, lambda choice, c=conflict: self._resolved(c, choice))
                 return
 

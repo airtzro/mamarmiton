@@ -23,6 +23,7 @@ class Settings:
     check_updates: bool = True
     last_update_check: str = ""  # ISO date of the last check
     snoozed_version: str = ""  # version the user postponed with "Plus tard"
+    share_usage: bool = True  # anonymous usage counters (see mamarmiton.usage)
 
     @classmethod
     def load(cls) -> "Settings":

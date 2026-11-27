@@ -96,6 +96,8 @@ export const api = {
   me: () => json(request("GET", "/me")),
   changePassword: (old_password, new_password) => request("POST", "/me/password", { json: { old_password, new_password } }),
   users: () => json(request("GET", "/users")),
+  sendUsage: (days) => request("POST", "/usage", { json: { client: CLIENT_HEADER, days } }),
+  sendReport: (report) => json(request("POST", "/reports", { json: report })),
   createInvite: (note) => json(request("POST", "/invites", { json: { note } })),
 
   sync: (since) => json(request("GET", `/recipes?since=${Number(since) || 0}`)),

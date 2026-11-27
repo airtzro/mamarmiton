@@ -128,3 +128,14 @@ uv venv .venv && uv pip install --python .venv -e ".[dev]" && uv pip install --p
 .venv/bin/python -m pytest          # API tests (test_api.py) and web page tests (test_web.py)
 MAMARMITON_SERVER_DATA=./data .venv/bin/python -m mamarmiton_server serve --port 8000
 ```
+
+## Usage counters and problem reports
+
+`POST /usage` takes anonymous daily counts (`usage_daily`: day, client kind, event, count; no user id,
+no recipe id, no text) so that after 8 weeks `python -m mamarmiton_server usage [--days 56]` shows
+which features are used (least used first). The allowed events are listed once per client
+(`mamarmiton_server/usage.py`, `mamarmiton/usage.py`, `web/usage.js`; a test keeps them equal);
+unknown ones are ignored. Clients have an opt-out switch. "Signaler un problème" posts to
+`POST /reports` (tied to the account so you can reply); read them with
+`python -m mamarmiton_server reports [--all]` (shown ones are marked read). Tokens and passwords
+are masked in the log on the client and again on the server.

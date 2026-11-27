@@ -1,4 +1,6 @@
+import { install as watchErrors } from "./diagnostics.js";
 import { api, setHandlers, token } from "./api.js";
+import { flushUsage } from "./usage.js";
 import { h, icon, clear } from "./dom.js";
 import { hydrate, pendingCount, persist, resetState, state, sync } from "./state.js";
 import * as store from "./offline.js";
@@ -59,6 +61,9 @@ function showLogin(message = "") {
   renderLogin(root, { message, onDone: (user) => start(user) });
 }
 
+watchErrors();
+const sendUsage = () => void flushUsage((days) => api.sendUsage(days));  // silent; at most every 5 minutes
+
 async function signOut() {
   const name = state.me && state.me.username;
   showLogin("");  // first: an in-flight sync must not write the copy back after it is erased
@@ -88,6 +93,7 @@ async function start(user) {
     if (!e.offline) toast(e.message, "error");
   }
   lastSync = Date.now();
+  sendUsage();
   clearInterval(timer);
   timer = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 60000);
   if (!cached) route();
@@ -152,6 +158,7 @@ async function refresh() {
   try {
     const changed = await sync();
     afterChange(changed);
+    sendUsage();
   } catch { /* offline or session ended: the banner / login screen already say so */ }
 }
 

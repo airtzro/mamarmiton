@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { hit } from "./usage.js";
 import { h, icon, clear } from "./dom.js";
 import { allRecipes, applyEntry, canEdit, getRecipe, newId, photos, saveRecipe, setFavorite, state, sync } from "./state.js";
 import { COMMON_UNITS, joinAmountUnit, splitAmountUnit } from "./quantities.js";
@@ -94,7 +95,12 @@ export function renderEditor(main, id, { done, cancel }) {
   const tagChips = h("div", { class: "chips tag-chips-edit" });
   const tagSuggest = h("div", { class: "chips" });
   const knownTags = tagCounts(allRecipes());
-  function addTags(...names) { tags = normalizeTags([...tags, ...names]); drawTags(); }
+  function addTags(...names) {
+    const before = tags.length;
+    tags = normalizeTags([...tags, ...names]);
+    if (tags.length > before) hit("tag_add");
+    drawTags();
+  }
   function drawTags() {
     clear(tagChips).append(...tags.map((t) => h("button", { class: "chip chip-btn is-on", type: "button",
       "aria-label": `Retirer l'étiquette ${t}`, onClick: () => { tags = tags.filter((x) => fold(x) !== fold(t)); drawTags(); },
@@ -224,6 +230,7 @@ export function renderEditor(main, id, { done, cancel }) {
         for (;;) {
           try {
             const saved = await saveRecipe(recipeId, recipe, baseVersion);
+            hit(existing ? "recipe_edit" : "recipe_create");
             if (saved.queued) {
               if (pending.length || removedImages.size) toast("Les photos n'ont pas pu être modifiées hors ligne : ajoutez-les une fois la connexion revenue.", "error");
               if (fav.checked !== (existing?.favori ?? false)) await setFavorite(recipeId, fav.checked);
@@ -237,6 +244,7 @@ export function renderEditor(main, id, { done, cancel }) {
             break;
           } catch (e) {
             if (e.status !== 409 || !e.detail || typeof e.detail !== "object" || !e.detail.current) throw e;
+            hit("sync_conflict_shown");
             const choice = await askConflict(recipe, e.detail.current);
             if (choice === "cancel") return;
             if (choice === "theirs") {

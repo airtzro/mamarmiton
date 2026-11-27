@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Callable
 
 import customtkinter as ctk
 
+from mamarmiton import usage
 from mamarmiton.models import (COOKING_TYPES, DISH_TYPES, MAX_TAGS, Ingredient, Recipe, fold,
                                normalize_tags, parse_int, parse_minutes)
 from mamarmiton.quantities import COMMON_UNITS, join_amount_unit, split_amount_unit
@@ -364,7 +365,10 @@ class EditorView(ctk.CTkFrame):
 
     # ------------------------------------------------------------------ tags
     def _add_tags(self, *names: str) -> None:
+        before = len(self.tags)
         self.tags = normalize_tags([*self.tags, *names])
+        if len(self.tags) > before:
+            usage.hit("tag_add")
         self._refresh_tags()
 
     def _remove_tag(self, tag: str) -> None:

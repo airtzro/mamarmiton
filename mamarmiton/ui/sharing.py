@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import customtkinter as ctk
 
+from mamarmiton import usage
 from mamarmiton.models import Recipe, fold
 from mamarmiton.ui import art, theme
 from mamarmiton.ui.remote_logic import error_text, run_in_thread
@@ -182,6 +183,7 @@ class ShareDialog(Modal):
             return self.client.shares()
 
         def done(shares):
+            usage.hit("share_create")
             self.selected = None
             self._loaded((self.users, shares))
             self.app.sync_now()

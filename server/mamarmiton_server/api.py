@@ -24,7 +24,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from mamarmiton.models import Recipe
-from mamarmiton_server import __version__, db, images, security
+from mamarmiton.report import redact
+from mamarmiton_server import __version__, db, images, security, usage
 from mamarmiton_server.config import Settings
 
 log = logging.getLogger(__name__)
@@ -180,6 +181,24 @@ class RecipeWrite(BaseModel):
     recipe: dict
     # the version this edit is based on; None = create a new recipe
     base_version: int | None = None
+
+
+class UsageBatch(BaseModel):
+    client: str = Field(default="", max_length=64)  # "desktop/4.1.0": only "desktop" or "web" is kept
+    days: dict = Field(default_factory=dict)        # {"2026-11-27": {"recipe_open": 3}}, validated by usage.clean_batch
+
+
+MAX_REPORT_MESSAGE = 4000
+MAX_REPORT_LOG = 64 * 1024  # bytes
+MAX_REPORTS_PER_DAY = 20    # per account
+
+
+class ReportBody(BaseModel):
+    message: str = Field(max_length=MAX_REPORT_MESSAGE)
+    client: str = Field(default="", max_length=64)
+    app_version: str = Field(default="", max_length=64)
+    os: str = Field(default="", max_length=300)
+    log_tail: str = Field(default="", max_length=MAX_REPORT_LOG)
 
 
 class ShareRequest(BaseModel):
@@ -739,5 +758,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         other = user_by_name(conn, username)
         conn.execute("DELETE FROM recipe_shares WHERE recipe_id = ? AND grantee_id = ?", (recipe_id, other["id"]))
         return Response(status_code=204)
+
+    @app.post("/usage")
+    def post_usage(body: UsageBatch, user: Session, conn: Conn) -> dict:
+        """Anonymous daily counters. The account only proves the sender is a family member; it is
+        not stored. Unknown events and malformed days are skipped, never an error."""
+        rows = usage.clean_batch(body.days)
+        if rows:
+            usage.record(conn, usage.client_kind(body.client), rows)
+        return {"accepted": len(rows)}
+
+    @app.post("/reports", status_code=201)
+    def post_report(body: ReportBody, user: Session, conn: Conn) -> dict:
+        message = body.message.strip()
+        if not message:
+            raise _error(422, "Écrivez quelques mots pour décrire le problème.")
+        log_tail = redact(body.log_tail)
+        if len(log_tail.encode("utf-8")) > MAX_REPORT_LOG:
+            raise _error(413, "Le journal joint est trop gros.")
+        since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(timespec="microseconds")
+        if conn.execute("SELECT COUNT(*) FROM reports WHERE user_id = ? AND created_at > ?",
+                        (user["id"], since)).fetchone()[0] >= MAX_REPORTS_PER_DAY:
+            raise _error(429, "Vous avez déjà envoyé beaucoup de messages aujourd'hui. Réessayez demain.")
+        cur = conn.execute(
+            "INSERT INTO reports (user_id, created_at, message, client, app_version, os, log_tail) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user["id"], db.now(), redact(message), body.client, body.app_version, body.os, log_tail))
+        return {"id": cur.lastrowid}
 
     return app

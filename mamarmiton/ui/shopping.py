@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import customtkinter as ctk
 
-from mamarmiton import config
+from mamarmiton import config, usage
 from mamarmiton.models import Recipe
 from mamarmiton.shopping import ShoppingItem, build_list, group_by_aisle, open_with_default_app, to_text
 from mamarmiton.ui import art, theme
@@ -260,6 +260,7 @@ class ShoppingView(ctk.CTkFrame):
         return to_text(self.items, state.checked, state.extras)
 
     def copy(self) -> None:
+        usage.hit("shopping_copy_or_print")
         self.clipboard_clear()
         self.clipboard_append(self.plain_text())
         self.update()  # keep the text on the clipboard after the window closes (X11)
@@ -275,6 +276,7 @@ class ShoppingView(ctk.CTkFrame):
 
     def print_list(self) -> None:
         """Write the list to a .txt file and open it: the user prints from there."""
+        usage.hit("shopping_copy_or_print")
         path = config.data_dir() / "liste-de-courses.txt"
         try:
             path.write_text(self.plain_text(), encoding="utf-8")

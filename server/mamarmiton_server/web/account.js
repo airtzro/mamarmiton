@@ -2,6 +2,8 @@ import { api, token } from "./api.js";
 import { h, icon, clear } from "./dom.js";
 import { pendingCount, state } from "./state.js";
 import { busy, confirmDialog, openDialog, toast } from "./ui.js";
+import { EXPLANATION, setUsageEnabled, usageEnabled } from "./usage.js";
+import { buildReport } from "./diagnostics.js";
 
 function field(label, input) {
   const id = `a-${Math.random().toString(36).slice(2, 8)}`;
@@ -28,12 +30,43 @@ export function openAccountDialog({ onSignOut }) {
           close();
           onSignOut();
         });
+        const share = h("input", { type: "checkbox", id: "share-usage", checked: usageEnabled() });
+        share.addEventListener("change", () => setUsageEnabled(share.checked));
+        const privacy = h("div", { class: "stack" },
+          h("label", { class: "row", for: "share-usage" }, share, h("span", { text: "Partager des statistiques d'utilisation anonymes" })),
+          h("p", { class: "muted", text: EXPLANATION }));
         clear(body).append(
           h("p", {}, "Connecté en tant que ", h("strong", { text: state.me.display_name || state.me.username }),
             h("span", { class: "muted", text: ` (@${state.me.username})` })),
           h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: passwordForm }, icon("key", 20), "Changer mon mot de passe"),
           state.me.is_admin ? h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: inviteForm }, icon("plus", 20), "Créer une invitation") : null,
-          signOut);
+          h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: reportForm }, icon("pencil", 20), "Signaler un problème"),
+          privacy, signOut);
+      }
+
+      function reportForm() {
+        const message = h("textarea", { rows: 6, maxlength: 4000, required: true, "aria-label": "Votre message",
+          placeholder: "Décrivez ce qui s'est passé, avec vos mots." });
+        const attach = h("input", { type: "checkbox", id: "report-log", checked: true });
+        const error = h("p", { class: "form-error", role: "alert" });
+        const send = h("button", { class: "btn btn-primary", type: "submit", text: "Envoyer" });
+        const form = h("form", { class: "stack", novalidate: true },
+          h("p", { text: "Votre message arrive directement à la personne qui s'occupe de Mamarmiton." }),
+          message,
+          h("label", { class: "row", for: "report-log" }, attach, h("span", { text: "Joindre le journal des erreurs (aide à comprendre)" })),
+          error,
+          h("div", { class: "row end wrap" }, h("button", { class: "btn btn-secondary", type: "button", onClick: home, text: "Retour" }), send));
+        form.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          if (!message.value.trim()) { error.textContent = "Écrivez quelques mots avant d'envoyer."; return; }
+          await busy(send, async () => {
+            try { await api.sendReport(buildReport(message.value, attach.checked)); toast("Merci, votre message a été envoyé.", "ok"); home(); }
+            catch (err) { error.textContent = err.offline ? "Pas de connexion pour le moment. Réessayez plus tard." : err.message; }
+          });
+        });
+        clear(body).append(form);
+        message.focus();
       }
 
       function passwordForm() {

@@ -144,11 +144,43 @@ def _m1_baseline(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _m2_usage_and_reports(conn: sqlite3.Connection) -> None:
+    """Anonymous usage counters (no user id, no recipe id) and problem reports (tied to the sender,
+    so the developer can answer)."""
+    for statement in _statements(USAGE_REPORTS_SCHEMA):
+        conn.execute(statement)
+
+
+USAGE_REPORTS_SCHEMA = """
+CREATE TABLE usage_daily (
+    day         TEXT NOT NULL,      -- YYYY-MM-DD, the client's local day
+    client_kind TEXT NOT NULL,      -- desktop | web | other (never a version, never a device)
+    event       TEXT NOT NULL,      -- one of usage.EVENTS, or "active"
+    count       INTEGER NOT NULL,
+    PRIMARY KEY (day, client_kind, event)
+);
+
+CREATE TABLE reports (
+    id          INTEGER PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL,
+    message     TEXT NOT NULL,
+    client      TEXT NOT NULL DEFAULT '',
+    app_version TEXT NOT NULL DEFAULT '',
+    os          TEXT NOT NULL DEFAULT '',
+    log_tail    TEXT NOT NULL DEFAULT '',
+    read_at     TEXT
+);
+CREATE INDEX reports_unread ON reports(read_at, id);
+"""
+
+
 # Ordered, append-only: (version, function(conn)). Never edit or reorder a released migration.
 # A migration runs inside the transaction that also bumps ``user_version``: just execute SQL,
 # never commit. See "Schema migrations" in server/README.md.
 MIGRATIONS: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _m1_baseline),
+    (2, _m2_usage_and_reports),
 ]
 
 

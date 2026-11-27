@@ -214,12 +214,29 @@ class SyncRunner:
                 result = store.sync()
             except Exception as exc:  # noqa: BLE001 - never kill the thread silently
                 result = exc
+            if not isinstance(result, Exception) and not getattr(result, "outdated", False):
+                self._send_extras(store)
             try:
                 self.widget.after(0, lambda: self._finished(store, result))
             except Exception:  # noqa: BLE001 - window closed meanwhile
                 pass
 
         threading.Thread(target=work, daemon=True).start()
+
+    @staticmethod
+    def _send_extras(store: Any) -> None:
+        """Piggy-back on a sync that worked: send the usage counters and any queued problem report.
+        Runs in the sync thread; failures are silent and retried at the next sync."""
+        client = getattr(store, "client", None)
+        if client is None or getattr(store, "status", "") in ("offline", "outdated", "auth"):
+            return
+        try:
+            from mamarmiton import report, usage
+
+            usage.flush(client)
+            report.send_pending(client)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _finished(self, store: Any, result: Any) -> None:
         self.running = False

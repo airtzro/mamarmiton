@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { h, clear } from "./dom.js";
+import { hit } from "./usage.js";
 import { displayName, state, sync } from "./state.js";
 import { busy, confirmDialog, openDialog, toast } from "./ui.js";
 
@@ -65,7 +66,10 @@ export function openShareDialog({ recipe }) {
         const add = h("button", { class: "btn btn-primary", type: "button", text: "Partager" });
         add.addEventListener("click", () => {
           const username = who.value;
-          if (username) act(add, () => (isBook ? api.shareBook(username, how.value === "edit") : api.shareRecipe(recipe.id, username, how.value === "edit")), "Partagé.");
+          if (username) act(add, async () => {
+            await (isBook ? api.shareBook(username, how.value === "edit") : api.shareRecipe(recipe.id, username, how.value === "edit"));
+            hit("share_create");
+          }, "Partagé.");
         });
         const form = candidates.length
           ? h("div", { class: "share-form" },

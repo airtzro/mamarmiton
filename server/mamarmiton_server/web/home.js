@@ -3,6 +3,7 @@ import { allRecipes, canEdit, displayName, photos, setFavorite, state } from "./
 import { DISH_TYPES, SORTS, formatMinutes, search, tagCounts, totalTime } from "./search.js";
 import { fold } from "./search.js";
 import { toast } from "./ui.js";
+import { hit } from "./usage.js";
 import { openShareDialog } from "./share.js";
 
 const CATEGORIES = [
@@ -43,6 +44,7 @@ export async function toggleFavorite(recipe, onDone) {
   const on = !recipe.favori;
   try {
     await setFavorite(recipe.id, on);
+    hit("favorite_toggle");
     onDone();
   } catch (e) { toast(e.message, "error"); }
 }
@@ -115,7 +117,7 @@ export function renderHome(main, { onNew }) {
       const on = f.tags.some((t) => fold(t) === fold(tag));
       return h("button", {
         class: `chip chip-btn chip-tag${on ? " is-on" : ""}`, type: "button", "aria-pressed": String(on),
-        onClick: () => { f.tags = on ? f.tags.filter((t) => fold(t) !== fold(tag)) : [...f.tags, tag]; draw(); },
+        onClick: () => { f.tags = on ? f.tags.filter((t) => fold(t) !== fold(tag)) : [...f.tags, tag]; if (!on) hit("tag_filter"); draw(); },
       }, `#${tag}`, h("span", { class: "chip-count", text: ` ${n}` }));
     }));
 
@@ -153,7 +155,7 @@ export function renderHome(main, { onNew }) {
   let timer;
   searchInput.addEventListener("input", () => {
     clearTimeout(timer);
-    timer = setTimeout(() => { f.text = searchInput.value; draw(); }, 120);
+    timer = setTimeout(() => { f.text = searchInput.value; if (f.text.trim()) hit("search"); draw(); }, 120);
   });
   sortSelect.addEventListener("change", () => { f.sort = sortSelect.value; draw(); });
   draw();

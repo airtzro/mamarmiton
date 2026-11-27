@@ -15,10 +15,11 @@ from typing import TYPE_CHECKING, Callable
 
 import customtkinter as ctk
 
-from mamarmiton import __version__, config
+from mamarmiton import __version__, config, report, usage
 from mamarmiton.importers import ImportResult, import_pdf, import_url, llm, pdf_text
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES
 from mamarmiton.ui import art, theme
+from mamarmiton.ui.remote_logic import error_text, run_in_thread
 from mamarmiton.ui.widgets import Choice, Modal, ScrollFrame
 
 if TYPE_CHECKING:
@@ -299,7 +300,29 @@ class HelpDialog(Modal):
         setting_row(4, "Vérifier les mises à jour", "Prévient quand une nouvelle version existe.",
                     theme.switch(card, text="", variable=upd_var, width=50,
                                  command=lambda: app.set_check_updates(upd_var.get())))
-        ctk.CTkFrame(card, fg_color="transparent", height=1, width=1).grid(row=10, column=0, pady=(0, 10))
+        share_var = ctk.BooleanVar(value=settings.share_usage)
+        setting_row(5, "Partager des statistiques d'utilisation anonymes",
+                    "Aide à savoir quelles fonctions servent.",
+                    theme.switch(card, text="", variable=share_var, width=50,
+                                 command=lambda: app.set_share_usage(share_var.get())))
+        note = ctk.CTkLabel(card, text=usage.EXPLANATION + "\nAucune statistique n'est envoyée si vous n'êtes pas "
+                            "connecté à un compte.", font=theme.font(12), text_color=theme.MUTED, anchor="w",
+                            justify="left", wraplength=560)
+        note.grid(row=12, column=0, columnspan=2, sticky="w", padx=20, pady=(0, 6))
+        wrapped.append((note, 2 * 10 + 2 * 20 + 4))
+        ctk.CTkFrame(card, fg_color="transparent", height=1, width=1).grid(row=13, column=0, pady=(0, 10))
+
+        # --- report a problem
+        card = theme.card(body)
+        card.pack(fill="x", padx=10, pady=(0, 16))
+        theme.heading(card, "Un problème ?", size=19).pack(anchor="w", padx=20, pady=(18, 0))
+        label = ctk.CTkLabel(card, text="Dites-nous ce qui ne va pas : le message arrive directement à la personne "
+                             "qui s'occupe de Mamarmiton.", font=theme.font(13), text_color=theme.MUTED, anchor="w",
+                             wraplength=560, justify="left")
+        label.pack(anchor="w", padx=20, pady=(2, 12))
+        wrapped.append((label, 2 * 10 + 2 * 20 + 4))
+        theme.secondary_button(card, text="Signaler un problème", width=0,
+                               command=lambda: ReportDialog(self, app)).pack(anchor="w", padx=20, pady=(0, 20))
 
         # --- backups
         card = theme.card(body)
@@ -331,6 +354,64 @@ class HelpDialog(Modal):
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.grid(row=2, column=0, sticky="ew", padx=28, pady=(6, 18))
         theme.primary_button(footer, text="Fermer", width=130, command=self.close).pack(side="right")
+
+
+class ReportDialog(Modal):
+    """"Signaler un problème": a message, optionally the end of the log. Offline, it is kept and sent later."""
+
+    def __init__(self, master, app: "App"):
+        super().__init__(master, "Signaler un problème", 560, 520)
+        self.app = app
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self.header("Signaler un problème", "Décrivez ce qui s'est passé, avec vos mots.")
+        form = ctk.CTkFrame(self, fg_color="transparent")
+        form.grid(row=1, column=0, sticky="nsew", padx=32)
+        form.grid_columnconfigure(0, weight=1)
+        form.grid_rowconfigure(0, weight=1)
+        self.text = theme.textbox(form, height=200)
+        self.text.grid(row=0, column=0, sticky="nsew")
+        self.attach = ctk.BooleanVar(value=True)
+        theme.switch(form, text="Joindre le journal de l'application (aide à comprendre)", variable=self.attach,
+                     font=theme.font(13)).grid(row=1, column=0, sticky="w", pady=(12, 0))
+        self.msg = ctk.CTkLabel(form, text="", font=theme.font(13), text_color=theme.MUTED, anchor="w",
+                                justify="left", wraplength=480)
+        self.msg.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        footer = ctk.CTkFrame(self, fg_color="transparent")
+        footer.grid(row=2, column=0, sticky="ew", padx=28, pady=(6, 18))
+        self.send_btn = theme.primary_button(footer, text="Envoyer", width=130, command=self._send)
+        self.send_btn.pack(side="right")
+        theme.secondary_button(footer, text="Annuler", width=0, command=self.close).pack(side="right", padx=(0, 8))
+        self.after(200, self.text.focus_set)
+
+    def _send(self) -> None:
+        message = self.text.get("1.0", "end").strip()
+        if not message:
+            self.msg.configure(text="Écrivez quelques mots avant d'envoyer.")
+            return
+        self.send_btn.configure(state="disabled", text="Un instant…")
+        attach = self.attach.get()
+        client = getattr(self.app.store, "client", None) if self.app.is_remote else None
+
+        def work() -> bool:
+            return report.submit(client, report.build(message, attach))
+
+        def done(sent: bool) -> None:
+            if sent:
+                messagebox.showinfo("Merci", "Votre message a été envoyé.", parent=self.app)
+            elif client is None:
+                messagebox.showinfo("Message gardé", "Vous n'êtes pas connecté à un compte : votre message est "
+                                    "gardé et sera envoyé dès que vous le serez.", parent=self.app)
+            else:
+                messagebox.showinfo("Message gardé", "Pas de connexion pour le moment : votre message est gardé "
+                                    "et sera envoyé automatiquement plus tard.", parent=self.app)
+            self.close()
+
+        def failed(exc: BaseException) -> None:
+            self.send_btn.configure(state="normal", text="Envoyer")
+            self.msg.configure(text=error_text(exc))
+
+        run_in_thread(self, work, done, failed)
 
 
 def ask_pdf(parent) -> Path | None:

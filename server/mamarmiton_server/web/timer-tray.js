@@ -2,6 +2,7 @@
 // user moves between views. Each timer stores its END timestamp (Date.now), never a
 // counter: a phone that throttles a background tab still shows the right time.
 import { h, icon } from "./dom.js";
+import { hit } from "./usage.js";
 import { findDurations, formatClock, formatShort, secondsLeft } from "./timers.js";
 
 const timers = [];            // {id, label, seconds, end, done}
@@ -84,6 +85,7 @@ function tick() {
 
 /** Start a timer. Call it from a click handler (the audio context is created there). */
 export function startTimer(label, seconds) {
+  hit("timer_start");
   unlockAudio();
   const t = { id: nextId++, label, seconds, end: Date.now() + seconds * 1000, done: false };
   timers.push(t);
