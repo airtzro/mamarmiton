@@ -84,6 +84,10 @@ def _open(url: str, accept: str, limit: int) -> tuple[bytes, str]:
 
 def fetch_html(url: str) -> str:
     data, charset = _open(url, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5", MAX_PAGE_BYTES)
+    return decode_page(data, charset)
+
+
+def decode_page(data: bytes, charset: str = "") -> str:
     if not charset:
         match = re.search(rb"<meta[^>]+charset=[\"']?([\w-]+)", data[:4096], re.I)
         charset = match.group(1).decode("ascii", "ignore") if match else "utf-8"

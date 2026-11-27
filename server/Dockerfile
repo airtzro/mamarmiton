@@ -18,7 +18,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Tesseract reads photos and scanned PDFs for the import (French + English); it also brings
 # libstdc++, the only system library the llama-cpp-python wheel needs (it bundles its OpenMP)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-fra \
+    && apt-get install -y --no-install-recommends ca-certificates tesseract-ocr tesseract-ocr-fra \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -32,8 +32,8 @@ RUN if [ "$WITH_LLM" = "1" ]; then \
 
 # only the recipe model and the importers of the desktop app, without its UI dependencies
 COPY pyproject.toml README.md ./
-COPY mamarmiton/__init__.py mamarmiton/models.py mamarmiton/quantities.py mamarmiton/redact.py mamarmiton/config.py mamarmiton/
-COPY mamarmiton/importers/__init__.py mamarmiton/importers/documents.py mamarmiton/importers/heuristic.py mamarmiton/importers/pdf_text.py mamarmiton/importers/llm.py mamarmiton/importers/pipeline.py mamarmiton/importers/
+COPY mamarmiton/__init__.py mamarmiton/models.py mamarmiton/quantities.py mamarmiton/redact.py mamarmiton/config.py mamarmiton/tls.py mamarmiton/
+COPY mamarmiton/importers/__init__.py mamarmiton/importers/documents.py mamarmiton/importers/heuristic.py mamarmiton/importers/pdf_text.py mamarmiton/importers/llm.py mamarmiton/importers/pipeline.py mamarmiton/importers/web.py mamarmiton/importers/
 RUN pip install --no-deps . && rm -rf /app/server /app/mamarmiton /app/*.toml /app/*.md /app/build
 
 RUN mkdir -p /data

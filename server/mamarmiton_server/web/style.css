@@ -123,7 +123,7 @@ main:focus { outline: none; }  /* focused by code on every page change, for scre
 /* -------------------------------------------------------------- forms */
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field > label, .check { font-weight: 700; }
-input[type="text"], input[type="password"], input[type="search"], input[type="number"], select, textarea {
+input[type="text"], input[type="url"], input[type="password"], input[type="search"], input[type="number"], select, textarea {
   width: 100%; min-height: 50px; padding: 10px 14px; font: inherit; color: var(--text); background: var(--surface);
   border: 2px solid var(--border-strong); border-radius: 12px;
 }

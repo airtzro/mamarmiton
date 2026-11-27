@@ -27,7 +27,7 @@ def test_dockerignore_lets_every_copied_file_through():
 
 def test_dockerfile_ships_the_importers_the_server_uses():
     shipped = set(_shipped_desktop_files())
-    for name in ("documents", "heuristic", "pdf_text", "llm", "pipeline"):
+    for name in ("documents", "heuristic", "pdf_text", "llm", "pipeline", "web"):
         assert f"mamarmiton/importers/{name}.py" in shipped
 
 

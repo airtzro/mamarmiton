@@ -122,6 +122,8 @@ export const api = {
     if (text && text.trim()) form.append("text", text);
     return json(request("POST", "/import/recipe", { form, signal }));
   },
+  /** Read a recipe from the address of a web page (the server fetches it, a few seconds). */
+  importUrl: (url, signal) => json(request("POST", "/import/url", { json: { url }, signal })),
 
   /** My recipes and photos as a zip (a Blob). */
   async exportBackup() { return (await request("GET", "/export")).blob(); },
