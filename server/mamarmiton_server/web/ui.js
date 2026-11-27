@@ -69,6 +69,45 @@ export function confirmDialog({ title, message, confirmText = "Confirmer", dange
   });
 }
 
+/**
+ * A "Plus" button that opens a short list of actions under it.
+ * `items` are {icon, text, onClick, danger}; null entries are skipped. Returns the wrapper element.
+ */
+export function actionMenu({ label = "Plus", ariaLabel = "Plus d'actions", items }) {
+  const list = items.filter(Boolean);
+  const id = `menu-${Math.random().toString(36).slice(2, 8)}`;
+  const button = h("button", { class: "btn btn-secondary", type: "button", "aria-expanded": "false", "aria-controls": id, "aria-haspopup": "true", "aria-label": ariaLabel },
+    icon("more", 20), h("span", { class: "btn-label", text: label }));
+  const menu = h("div", { class: "action-menu", id, hidden: true });
+  const box = h("div", { class: "action-menu-box" }, button, menu);
+  const open = (yes) => {
+    menu.hidden = !yes;
+    button.setAttribute("aria-expanded", String(yes));
+    if (yes) menu.querySelector("button")?.focus();
+  };
+  for (const item of list) {
+    menu.append(h("button", { class: `action-item${item.danger ? " is-danger" : ""}`, type: "button",
+      onClick: (e) => { open(false); item.onClick(e, button); } }, icon(item.icon, 20), h("span", { text: item.text })));
+  }
+  button.addEventListener("click", () => open(menu.hidden));
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !menu.hidden) { e.stopPropagation(); open(false); button.focus(); }
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !menu.hidden) {
+      e.preventDefault();
+      const all = [...menu.querySelectorAll("button")];
+      const i = all.indexOf(document.activeElement);
+      all[(i + (e.key === "ArrowDown" ? 1 : -1) + all.length) % all.length].focus();
+    }
+  });
+  const outside = (e) => {
+    if (!box.isConnected) { document.removeEventListener("click", outside, true); return; }
+    if (!menu.hidden && !box.contains(e.target)) open(false);
+  };
+  document.addEventListener("click", outside, true);
+  box.hidden = !list.length;
+  return box;
+}
+
 /** Disable `button` while `task` runs, so a double tap cannot send twice. */
 export async function busy(button, task) {
   button.disabled = true;

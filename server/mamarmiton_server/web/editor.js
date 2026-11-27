@@ -92,8 +92,8 @@ export function renderEditor(main, id, { done, cancel }) {
   let tags = normalizeTags(existing?.tags);
   const tagInput = h("input", { type: "text", maxlength: MAX_TAG_LEN * 3, placeholder: "ex. Noël", autocomplete: "off",
     enterkeyhint: "done", "aria-label": "Ajouter une étiquette" });
-  const tagChips = h("div", { class: "chips tag-chips-edit" });
-  const tagSuggest = h("div", { class: "chips" });
+  const tagChips = h("div", { class: "chip-wrap" });
+  const tagSuggest = h("div", { class: "chip-wrap", role: "group", "aria-label": "Étiquettes déjà utilisées" });
   const knownTags = tagCounts(allRecipes());
   function addTags(...names) {
     const before = tags.length;
@@ -102,14 +102,14 @@ export function renderEditor(main, id, { done, cancel }) {
     drawTags();
   }
   function drawTags() {
-    clear(tagChips).append(...tags.map((t) => h("button", { class: "chip chip-btn is-on", type: "button",
-      "aria-label": `Retirer l'étiquette ${t}`, onClick: () => { tags = tags.filter((x) => fold(x) !== fold(t)); drawTags(); },
-      text: `${t}  ✕` })));
+    clear(tagChips).append(...tags.map((t) => h("button", { class: "chip-btn chip-tag is-on", type: "button",
+      "aria-label": `Retirer l'étiquette ${t}`, onClick: () => { tags = tags.filter((x) => fold(x) !== fold(t)); drawTags(); } },
+    `#${t}`, icon("close", 16))));
     const typed = fold(tagInput.value);
     const have = new Set(tags.map(fold));
     const options = knownTags.filter(({ tag }) => !have.has(fold(tag)) && fold(tag).includes(typed)).slice(0, 12);
-    clear(tagSuggest).append(...options.map(({ tag }) => h("button", { class: "chip chip-btn", type: "button",
-      onClick: () => { tagInput.value = ""; addTags(tag); }, text: tag })));
+    clear(tagSuggest).append(...options.map(({ tag }) => h("button", { class: "chip-btn chip-tag", type: "button",
+      onClick: () => { tagInput.value = ""; addTags(tag); } }, icon("plus", 16), tag)));
     tagInput.disabled = tags.length >= MAX_TAGS;
   }
   tagInput.addEventListener("keydown", (e) => {
@@ -294,10 +294,9 @@ export function renderEditor(main, id, { done, cancel }) {
   }
 
   const form = h("form", { class: "editor stack", novalidate: true, onSubmit: save },
-    h("div", { class: "detail-bar" },
-      h("button", { class: "btn btn-ghost", type: "button", onClick: leave }, icon("back", 20), "Annuler"),
-      h("h1", { class: "serif", text: id ? "Modifier la recette" : "Nouvelle recette" })),
-    h("p", { class: "muted", text: "Seul le nom est obligatoire. Le reste peut être complété plus tard." }),
+    h("header", { class: "editor-head" },
+      h("h1", { class: "serif", text: id ? "Modifier la recette" : "Nouvelle recette" }),
+      h("p", { class: "muted", text: "Seul le nom est obligatoire. Le reste peut être complété plus tard." })),
     h("section", { class: "card pad stack" },
       field("Nom de la recette *", nom, { id: "e-nom" }),
       h("div", { class: "grid-2" }, field("Type de plat", dish), field("Mode de cuisson", cooking)),
@@ -327,9 +326,9 @@ export function renderEditor(main, id, { done, cancel }) {
         h("button", { class: "btn btn-secondary", type: "button", onClick: () => cameraInput.click() }, icon("camera", 20), "Prendre une photo"),
         h("button", { class: "btn btn-secondary", type: "button", onClick: () => libraryInput.click() }, icon("image", 20), "Choisir une photo"),
         cameraInput, libraryInput)),
-    error,
-    h("div", { class: "row end wrap" },
-      h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: leave, text: "Annuler" }), saveBtn));
+    h("div", { class: "save-bar" }, error,
+      h("div", { class: "save-bar-buttons" },
+        h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: leave, text: "Annuler" }), saveBtn)));
   clear(main).append(h("div", { class: "container narrow" }, form));
   nom.focus();
   return { update() {} };

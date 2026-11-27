@@ -50,25 +50,37 @@ export async function toggleFavorite(recipe, onDone) {
   } catch (e) { toast(e.message, "error"); }
 }
 
+/** The first ingredient names, for the card: enough to tell two cakes apart. */
+export function ingredientPreview(recipe, max = 6) {
+  const names = recipe.ingredients.map((i) => String(i.nom || "").trim()).filter(Boolean);
+  if (!names.length) return "";
+  const shown = names.slice(0, max).join(", ");
+  return names.length > max ? `${shown}…` : shown;
+}
+
+/** One recipe in the list: an index card with a dish-coloured edge, and the first photo beside it when there is one. */
 function recipeCard(recipe, refresh) {
+  const photo = recipe.images.length > 0;
   const star = h("button", {
     class: `fav-btn${recipe.favori ? " is-on" : ""}`, type: "button", "aria-pressed": String(recipe.favori),
     "aria-label": recipe.favori ? `Retirer ${recipe.nom} des favoris` : `Ajouter ${recipe.nom} aux favoris`,
     onClick: () => toggleFavorite(recipe, refresh),
   }, icon(recipe.favori ? "star-filled" : "star", 22));
   const time = totalTime(recipe);
-  return h("article", { class: "card recipe-card" },
-    cover(recipe),
-    star,
-    h("div", { class: "card-body" },
+  const preview = ingredientPreview(recipe);
+  return h("article", { class: `card recipe-card ${dishClass(recipe.type_plat)}${photo ? " has-photo" : ""}` },
+    h("div", { class: "rc-body" },
       h("h3", { class: "card-title serif" }, h("a", { href: `#/r/${recipe.id}`, text: recipe.nom })),
+      preview ? h("p", { class: "rc-ings", text: preview }) : h("p", { class: "rc-ings is-empty", text: "Pas encore d'ingrédients" }),
       h("p", { class: "meta" },
-        h("span", { class: "meta-item" }, icon("clock", 16), time ? formatMinutes(time) : "—"),
-        h("span", { class: "meta-item" }, icon("users", 16), `${recipe.pour} pers.`),
-        h("span", { class: `chip chip-dish ${dishClass(recipe.type_plat)}`, text: recipe.type_plat })),
+        h("span", { class: "meta-item rc-dish" }, h("span", { class: "dish-dot", "aria-hidden": "true" }), recipe.type_plat),
+        time ? h("span", { class: "meta-item" }, icon("clock", 16), formatMinutes(time)) : null,
+        h("span", { class: "meta-item" }, icon("users", 16), `${recipe.pour} pers.`)),
       recipe.access !== "owner"
-        ? h("p", { class: "owner" }, `De ${displayName(recipe.owner)}`, recipe.access === "read" ? " · lecture seule" : " · modifiable")
-        : null));
+        ? h("p", { class: "owner" }, `De ${displayName(recipe.owner)}`, recipe.access === "read" ? ", en lecture seule" : ", modifiable")
+        : null),
+    photo ? h("div", { class: "rc-photo" }, coverImage(recipe, recipe.images[0].id)) : null,
+    star);
 }
 
 /** The book switcher, pinned bottom-left: all books, mine, or one person's. `choose(id)` is called on a pick. */
@@ -123,14 +135,13 @@ function bookSwitcher(choose) {
 export function renderHome(main, { onNew }) {
   document.title = "Mamarmiton";
   const f = state.filters;
-  const count = h("p", { class: "count muted" });
-  const eyebrow = h("p", { class: "eyebrow" });
+  const count = h("p", { class: "count", "aria-live": "polite" });
   const title = h("h1", { class: "serif" });
   const searchInput = h("input", { type: "search", id: "q", placeholder: "Rechercher une recette ou un ingrédient…",
     value: f.text, autocomplete: "off", enterkeyhint: "search" });
-  const sortSelect = h("select", { id: "sort" }, SORTS.map((s) => h("option", { value: s, text: `Tri : ${s[0].toLowerCase()}${s.slice(1)}`, selected: s === f.sort })));
-  const chips = h("div", { class: "chips", role: "group", "aria-label": "Catégories" });
-  const tagRow = h("div", { class: "chips tag-chips", role: "group", "aria-label": "Étiquettes" });
+  const sortSelect = h("select", { id: "sort" }, SORTS.map((s) => h("option", { value: s, text: s, selected: s === f.sort })));
+  const chips = h("div", { class: "filter-group", role: "group", "aria-label": "Catégories" });
+  const tagRow = h("div", { class: "filter-group tag-chips", role: "group", "aria-label": "Étiquettes" });
   const list = h("div", { class: "grid", id: "recipe-list" });
   const empty = h("div", { class: "empty" });
   if (f.book === null || f.book === undefined) f.book = state.me ? loadBook(localStorage, state.me.username) : ALL;
@@ -141,19 +152,18 @@ export function renderHome(main, { onNew }) {
     window.scrollTo(0, 0);
   });
 
-  const shareBtn = h("button", { class: "btn btn-secondary", type: "button", onClick: () => openShareDialog({ recipe: null }) },
-    icon("share", 18), h("span", { text: "Partager mon carnet" }));
+  const resultsBar = h("div", { class: "results-bar" }, count,
+    h("div", { class: "sort-box" }, h("label", { for: "sort", text: "Trier par" }), sortSelect));
+  const shareBtn = h("button", { class: "btn btn-secondary share-book", type: "button", "aria-label": "Partager mon carnet",
+    onClick: () => openShareDialog({ recipe: null }) }, icon("share", 20), h("span", { class: "btn-label", text: "Partager mon carnet" }));
 
   clear(main).append(
     h("div", { class: "container has-book-switch" },
-      h("header", { class: "page-head" },
-        h("div", {}, eyebrow, title, count),
-        h("div", { class: "page-actions" }, shareBtn)),
-      h("div", { class: "toolbar" },
-        h("div", { class: "search-box" }, icon("search", 20),
-          h("label", { class: "sr-only", for: "q", text: "Rechercher" }), searchInput),
-        h("div", { class: "sort-box" }, h("label", { class: "sr-only", for: "sort", text: "Trier" }), sortSelect)),
-      chips, tagRow, list, empty),
+      h("header", { class: "page-head" }, title, shareBtn),
+      h("div", { class: "search-box" }, icon("search", 22),
+        h("label", { class: "sr-only", for: "q", text: "Rechercher" }), searchInput),
+      h("div", { class: "filters" }, chips, tagRow),
+      resultsBar, list, empty),
     switcher.el);
 
   function draw() {
@@ -167,7 +177,7 @@ export function renderHome(main, { onNew }) {
     switcher.paint(options, f.book);
     shareBtn.hidden = f.book !== ALL && f.book !== MINE;
     clear(chips).append(...CATEGORIES.map(([value, label]) => h("button", {
-      class: `chip chip-btn${f.category === value ? " is-on" : ""}`, type: "button", "aria-pressed": String(f.category === value),
+      class: `chip-btn${f.category === value ? " is-on" : ""}`, type: "button", "aria-pressed": String(f.category === value),
       onClick: () => { f.category = value; draw(); }, text: label,
     })));
 
@@ -178,22 +188,24 @@ export function renderHome(main, { onNew }) {
     tagRow.append(...counts.map(({ tag, n }) => {
       const on = f.tags.some((t) => fold(t) === fold(tag));
       return h("button", {
-        class: `chip chip-btn chip-tag${on ? " is-on" : ""}`, type: "button", "aria-pressed": String(on),
+        class: `chip-btn chip-tag${on ? " is-on" : ""}`, type: "button", "aria-pressed": String(on),
         onClick: () => { f.tags = on ? f.tags.filter((t) => fold(t) !== fold(tag)) : [...f.tags, tag]; if (!on) hit("tag_filter"); draw(); },
-      }, `#${tag}`, h("span", { class: "chip-count", text: ` ${n}` }));
+      }, `#${tag}`, h("span", { class: "chip-count", text: String(n) }));
     }));
 
     const shown = search(all, f, f.sort);
     const filtered = !!(f.text.trim() || f.category || f.tags.length);
+    const name = state.me ? (state.me.display_name || state.me.username) : "";
     if (!filtered) {
-      eyebrow.textContent = `${greeting()} !`.toUpperCase();
-      title.textContent = f.book === ALL ? "Qu'est-ce qu'on cuisine ?" : f.book === MINE ? "Mon carnet" : `Le carnet de ${book.short}`;
+      if (f.book === ALL) {
+        title.replaceChildren(h("span", { class: "greet", text: `${greeting()}${name ? ` ${name}` : ""},` }), "qu'est-ce qu'on cuisine ?");
+      } else title.textContent = f.book === MINE ? "Mon carnet" : `Le carnet de ${book.short}`;
     } else {
-      eyebrow.textContent = (f.book === ALL ? "Votre carnet" : book.label).toUpperCase();
       title.textContent = f.category === "favoris" ? "Mes favoris" : DISH_TYPES.includes(f.category) ? `${f.category}s` : "Résultats";
     }
     document.title = f.book === ALL ? "Mamarmiton" : `${book.label} · Mamarmiton`;
-    count.textContent = all.length ? plural(shown.length, "recette") : "";
+    count.textContent = !all.length ? "" : filtered ? `${plural(shown.length, "recette")} sur ${all.length}` : plural(shown.length, "recette");
+    resultsBar.hidden = !all.length;
 
     clear(list).append(...shown.map((r) => recipeCard(r, draw)));
     clear(empty);

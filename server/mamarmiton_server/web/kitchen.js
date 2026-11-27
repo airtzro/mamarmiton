@@ -46,13 +46,15 @@ export function openKitchen(recipe, { servings, start = 0, onClose } = {}) {
   const counter = h("p", { class: "k-counter serif", "aria-live": "polite" });
   const text = h("p", { class: "k-text" });
   const timersBox = h("div", { class: "k-timers" });
-  const stage = h("div", { class: "k-stage" }, text, timersBox);
+  const upNext = h("p", { class: "k-next" });
+  const stage = h("div", { class: "k-stage" }, text, timersBox, upNext);
+  const progress = h("div", { class: "k-progress", "aria-hidden": "true" }, steps.map(() => h("span", {})));
   const prev = h("button", { class: "btn btn-secondary k-nav", type: "button", onClick: () => go(-1) }, icon("back", 30), h("span", { text: "Précédent" }));
   const nextLabel = h("span", { text: "Suivant" });
   const next = h("button", { class: "btn btn-primary k-nav", type: "button", onClick: () => go(1) }, nextLabel, icon("next", 30));
   const ingBtn = h("button", { class: "btn btn-secondary", type: "button", "aria-pressed": "false", onClick: toggleIngredients },
     icon("pot", 22), h("span", { class: "btn-label", text: "Ingrédients" }));
-  const quit = h("button", { class: "btn btn-secondary", type: "button", onClick: () => close() },
+  const quit = h("button", { class: "btn btn-secondary", type: "button", "aria-label": "Quitter le mode cuisine", onClick: () => close() },
     icon("close", 22), h("span", { class: "btn-label", text: "Quitter" }));
 
   const ingList = recipe.ingredients.length
@@ -69,6 +71,7 @@ export function openKitchen(recipe, { servings, start = 0, onClose } = {}) {
 
   const overlay = h("div", { class: "kitchen", role: "dialog", "aria-modal": "true", "aria-label": `Mode cuisine : ${recipe.nom}`, tabindex: "-1" },
     h("header", { class: "k-top" }, counter, h("p", { class: "k-title muted", text: recipe.nom }), ingBtn, quit),
+    progress,
     h("div", { class: "k-body" }, stage, panel),
     h("nav", { class: "k-bottom", "aria-label": "Étapes" }, prev, next));
 
@@ -88,6 +91,9 @@ export function openKitchen(recipe, { servings, start = 0, onClose } = {}) {
     text.className = `k-text ${stepSizeClass(step)}`;
     prev.disabled = index === 0;
     nextLabel.textContent = index === n - 1 ? "Terminer" : "Suivant";
+    [...progress.children].forEach((seg, i) => { seg.className = i < index ? "is-done" : i === index ? "is-current" : ""; });
+    upNext.replaceChildren(...(index < n - 1
+      ? [h("span", { class: "k-next-label", text: "Ensuite" }), h("span", { text: steps[index + 1] })] : []));
     const buttons = timerButtons(index, step, "k-timer-buttons");
     if (buttons) timersBox.append(buttons);
     stage.scrollTop = 0;

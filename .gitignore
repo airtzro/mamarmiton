@@ -24,3 +24,6 @@ recette_fav.json
 server/.env
 server/.venv/
 server/data/
+
+# Claude Code personal settings
+.claude/settings.local.json

@@ -4,7 +4,7 @@ import { h, icon, clear } from "./dom.js";
 import { canEdit, deleteRecipe, displayName, getRecipe, photos, state, sync } from "./state.js";
 import { frac, scaleQuantity } from "./quantities.js";
 import { formatMinutes } from "./search.js";
-import { busy, confirmDialog, openDialog, toast } from "./ui.js";
+import { actionMenu, busy, confirmDialog, openDialog, toast } from "./ui.js";
 import { cover, dishClass, toggleFavorite } from "./home.js";
 import { openShareDialog } from "./share.js";
 import { openKitchen } from "./kitchen.js";
@@ -63,53 +63,61 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
     const editable = canEdit(recipe);
 
     const back = h("a", { class: "btn btn-ghost", href: "#/" }, icon("back", 20), h("span", { text: "Toutes les recettes" }));
-    const favBtn = h("button", { class: `btn btn-secondary${recipe.favori ? " is-on" : ""}`, type: "button", "aria-pressed": String(recipe.favori),
-      onClick: () => toggleFavorite(recipe, onChange) }, icon(recipe.favori ? "star-filled" : "star", 20),
-    h("span", { class: "btn-label", text: recipe.favori ? "Dans mes favoris" : "Ajouter aux favoris" }));
-    const cookBtn = h("button", { class: "btn btn-secondary", type: "button",
-      onClick: () => hit("kitchen_open") || openKitchen(recipe, { servings: servingsMemo.get(id) ?? recipe.pour }) },
-    icon("chef", 20), h("span", { class: "btn-label", text: "Mode cuisine" }));
+    const favBtn = h("button", { class: `btn btn-secondary btn-icon fav-toggle${recipe.favori ? " is-on" : ""}`, type: "button",
+      "aria-pressed": String(recipe.favori), "aria-label": "Favori", title: recipe.favori ? "Retirer des favoris" : "Ajouter aux favoris",
+      onClick: () => toggleFavorite(recipe, onChange) }, icon(recipe.favori ? "star-filled" : "star", 22));
+    const cookBtn = recipe.etapes.length
+      ? h("button", { class: "btn btn-primary btn-big", type: "button",
+        onClick: () => hit("kitchen_open") || openKitchen(recipe, { servings: servingsMemo.get(id) ?? recipe.pour }) },
+      icon("chef", 22), h("span", { text: "Commencer à cuisiner" }))
+      : null;
     const inList = servingsInList(id);
-    const shopBtn = h("button", { class: "btn btn-secondary", type: "button", onClick: () => {
-      const n = servingsMemo.get(id) ?? recipe.pour;
-      hit("shopping_add");
-      addRecipeToShopping(recipe, n);
-      toast(`Ajouté aux courses pour ${n} personne${n > 1 ? "s" : ""}.`, "ok");
-      draw();
-    } }, icon("cart", 20), h("span", { class: "btn-label",
-      text: inList === null ? "Ajouter aux courses" : `Dans les courses (${inList} pers.) · mettre à jour` }));
-    const actions = h("div", { class: "actions" }, favBtn, cookBtn, shopBtn);
-    if (recipe.access === "owner") {
-      actions.append(h("button", { class: "btn btn-secondary", type: "button", onClick: () => openShareDialog({ recipe }) },
-        icon("share", 20), h("span", { class: "btn-label", text: "Partager" })));
-    }
-    if (editable) {
-      actions.append(h("button", { class: "btn btn-primary", type: "button", onClick: () => onEdit(id) },
-        icon("pencil", 20), h("span", { class: "btn-label", text: "Modifier" })));
-    }
-    if (recipe.access === "owner") {
-      const del = h("button", { class: "btn btn-danger", type: "button" }, icon("trash", 20), h("span", { class: "btn-label", text: "Supprimer" }));
-      del.addEventListener("click", async () => {
-        const ok = await confirmDialog({ title: "Supprimer cette recette ?", danger: true, confirmText: "Supprimer",
-          message: `« ${recipe.nom} » sera supprimée définitivement, avec ses photos.` });
-        if (!ok) return;
-        await busy(del, async () => {
-          try {
-            const { queued } = await deleteRecipe(id);
-            hit("recipe_delete");
-            servingsMemo.delete(id);
-            toast(queued ? "Recette supprimée sur cet appareil. Elle le sera partout au retour de la connexion." : "Recette supprimée.", "ok");
-            location.hash = "#/";
-          } catch (e) { toast(e.message, "error"); }
-        });
-      });
-      actions.append(del);
-    }
+    const shopBtn = inList !== null && inList === servings
+      ? h("a", { class: "btn btn-secondary", href: "#/courses" }, icon("check", 20), h("span", { text: "Dans les courses" }))
+      : h("button", { class: "btn btn-secondary", type: "button", onClick: () => {
+        hit("shopping_add");
+        addRecipeToShopping(recipe, servings);
+        toast(`Ajouté aux courses pour ${servings} personne${servings > 1 ? "s" : ""}.`, "ok");
+        draw();
+      } }, icon("cart", 20), h("span", { text: inList === null ? "Ajouter aux courses" : `Courses : passer à ${servings} pers.` }));
 
-    // ---- hero
-    const hero = h("section", { class: "hero card" });
-    const gallery = h("div", { class: "gallery" });
-    if (recipe.images.length) {
+    // rarely used actions wait behind "Plus"
+    const photoInput = h("input", { type: "file", accept: "image/*", multiple: true, class: "sr-only", tabindex: "-1", "aria-hidden": "true" });
+    const owner = recipe.access === "owner";
+    const more = actionMenu({ items: [
+      owner ? { icon: "share", text: "Partager", onClick: () => openShareDialog({ recipe }) } : null,
+      editable ? { icon: "camera", text: "Ajouter une photo", onClick: () => photoInput.click() } : null,
+      owner ? { icon: "trash", text: "Supprimer", danger: true, onClick: (e, button) => removeRecipe(button) } : null,
+    ] });
+    photoInput.addEventListener("change", () => {
+      const files = [...photoInput.files];
+      photoInput.value = "";
+      if (files.length) addPhotos(recipe, files, more.querySelector("button"));
+    });
+    async function removeRecipe(button) {
+      const ok = await confirmDialog({ title: "Supprimer cette recette ?", danger: true, confirmText: "Supprimer",
+        message: `« ${recipe.nom} » sera supprimée définitivement, avec ses photos.` });
+      if (!ok) return;
+      await busy(button, async () => {
+        try {
+          const { queued } = await deleteRecipe(id);
+          hit("recipe_delete");
+          servingsMemo.delete(id);
+          toast(queued ? "Recette supprimée sur cet appareil. Elle le sera partout au retour de la connexion." : "Recette supprimée.", "ok");
+          location.hash = "#/";
+        } catch (e) { toast(e.message, "error"); }
+      });
+    }
+    const topActions = h("div", { class: "actions" },
+      editable ? h("button", { class: "btn btn-secondary", type: "button", "aria-label": "Modifier la recette", onClick: () => onEdit(id) },
+        icon("pencil", 20), h("span", { class: "btn-label", text: "Modifier" })) : null,
+      more, photoInput);
+
+    // ---- hero: what it is, how long it takes, and the way into cooking it
+    const photo = recipe.images.length > 0;
+    const hero = h("section", { class: `hero card${photo ? " has-photo" : ""}` });
+    if (photo) {
+      const gallery = h("div", { class: "gallery" });
       const main_ = cover(recipe, "hero");
       main_.setAttribute("role", "button");
       main_.setAttribute("tabindex", "0");
@@ -126,38 +134,34 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
           return t;
         })));
       }
-    } else {
-      gallery.append(cover(recipe, "hero"));
-    }
-    if (editable) {
-      const input = h("input", { type: "file", accept: "image/*", multiple: true, class: "sr-only", "aria-label": "Ajouter une photo" });
-      const addBtn = h("button", { class: "btn btn-secondary btn-small", type: "button", onClick: () => input.click() }, icon("camera", 18), "Ajouter une photo");
-      input.addEventListener("change", () => { const files = [...input.files]; input.value = ""; if (files.length) addPhotos(recipe, files, addBtn); });
-      gallery.append(h("div", { class: "row" }, addBtn, input));
+      hero.append(gallery);
     }
 
-    const facts = [["clock", "Préparation", recipe.temps ? formatMinutes(recipe.temps) : "—"],
-      ["pot", "Cuisson", recipe.temps_cuisson ? formatMinutes(recipe.temps_cuisson) : "—"],
-      ["clock", "Total", recipe.temps + recipe.temps_cuisson ? formatMinutes(recipe.temps + recipe.temps_cuisson) : "—"],
-      ["users", "Pour", `${recipe.pour} pers.`]];
+    const facts = [];
+    if (recipe.temps) facts.push(["Préparation", formatMinutes(recipe.temps)]);
+    if (recipe.temps_cuisson) facts.push(["Cuisson", formatMinutes(recipe.temps_cuisson)]);
+    if (recipe.temps && recipe.temps_cuisson) facts.push(["Total", formatMinutes(recipe.temps + recipe.temps_cuisson)]);
+    facts.push(["Pour", `${recipe.pour} pers.`]);
     const info = h("div", { class: "hero-info" },
-      h("p", {}, h("span", { class: `chip chip-dish ${dishClass(recipe.type_plat)}`, text: recipe.type_plat }), " ",
-        h("span", { class: "chip", text: recipe.type_cuisson })),
-      recipe.tags.length
-        ? h("p", { class: "tag-list" }, recipe.tags.map((tag) => h("button", {
-          class: "chip chip-btn chip-tag", type: "button", title: `Voir les recettes « ${tag} »`,
-          onClick: () => { state.filters.text = ""; state.filters.category = ""; state.filters.book = ""; state.filters.tags = [tag]; hit("tag_filter"); location.hash = "#/"; },
-          text: `#${tag}` })))
-        : null,
+      h("p", { class: "hero-kind" },
+        h("span", { class: `rc-dish ${dishClass(recipe.type_plat)}` }, h("span", { class: "dish-dot", "aria-hidden": "true" }), recipe.type_plat),
+        recipe.type_cuisson ? h("span", { class: "muted", text: recipe.type_cuisson }) : null),
       h("h1", { class: "serif", text: recipe.nom }),
       recipe.access !== "owner"
         ? h("p", { class: "owner-note" }, icon("eye", 18), `Recette de ${displayName(recipe.owner)}`,
-          recipe.access === "read" ? " · vous pouvez la lire, pas la modifier." : " · vous pouvez la modifier.")
+          recipe.access === "read" ? " : vous pouvez la lire, pas la modifier." : " : vous pouvez la modifier.")
         : null,
-      recipe.source ? h("p", { class: "muted italic", text: `Importée depuis « ${recipe.source} »` }) : null,
-      h("dl", { class: "facts" }, facts.map(([ic, label, value]) =>
-        h("div", { class: "fact" }, h("dt", {}, icon(ic, 16), label), h("dd", { class: "serif", text: value })))));
-    hero.append(gallery, info);
+      h("dl", { class: "facts" }, facts.map(([label, value]) =>
+        h("div", { class: "fact" }, h("dt", { text: label }), h("dd", { class: "serif", text: value })))),
+      h("div", { class: "hero-actions" }, cookBtn, shopBtn, favBtn),
+      recipe.tags.length
+        ? h("p", { class: "tag-list" }, recipe.tags.map((tag) => h("button", {
+          class: "chip-btn chip-tag", type: "button", title: `Voir les recettes « ${tag} »`,
+          onClick: () => { state.filters.text = ""; state.filters.category = ""; state.filters.book = ""; state.filters.tags = [tag]; hit("tag_filter"); location.hash = "#/"; },
+          text: `#${tag}` })))
+        : null,
+      recipe.source ? h("p", { class: "hint", text: `Importée depuis « ${recipe.source} »` }) : null);
+    hero.append(info);
 
     // ---- ingredients
     const factor = frac(servings, Math.max(1, recipe.pour));
@@ -176,7 +180,7 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
         return row;
       }))
       : h("p", { class: "muted", text: "Aucun ingrédient pour l'instant." });
-    const ingredients = h("section", { class: "card pad" },
+    const ingredients = h("section", { class: "card pad ingredients-card" },
       h("h2", { class: "serif", text: "Ingrédients" }), stepper,
       servings !== recipe.pour
         ? h("button", { class: "btn btn-link", type: "button", onClick: () => { servingsMemo.delete(id); draw(); },
@@ -189,7 +193,7 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
       h("div", { class: "row between" }, h("h2", { class: "serif", text: "Préparation" }),
         recipe.etapes.length ? h("span", { class: "muted", text: `${recipe.etapes.length} étape${recipe.etapes.length > 1 ? "s" : ""}` }) : null),
       recipe.etapes.length
-        ? [h("p", { class: "hint", text: "Astuce : touchez une étape quand elle est faite." }),
+        ? [h("p", { class: "hint", text: "Touchez une étape pour la cocher quand elle est faite." }),
           h("ol", { class: "steps" }, recipe.etapes.map((text, i) => {
             const badge = h("span", { class: "badge", "aria-hidden": "true" }, done.has(i) ? icon("check", 18) : String(i + 1));
             const button = h("button", { class: `step${done.has(i) ? " is-done" : ""}`, type: "button", "aria-pressed": String(done.has(i)),
@@ -209,7 +213,7 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
       : null;
 
     clear(main).append(h("div", { class: "container detail" },
-      h("div", { class: "detail-bar" }, back, actions),
+      h("div", { class: "detail-bar" }, back, topActions),
       hero,
       h("div", { class: "detail-body" }, ingredients, h("div", { class: "stack" }, steps, notes))));
   }
