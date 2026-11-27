@@ -15,6 +15,7 @@ import logging
 import os
 import shutil
 import tempfile
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -43,6 +44,37 @@ def _atomic_write_json(path: Path, data: object) -> None:
 
 def _safe_folder_name(name: str) -> str:
     return "".join(c for c in name if c not in '<>:"/\\|?*').strip() or "recette"
+
+
+@dataclass
+class Trashed:
+    """A deleted recipe that can still be brought back with ``store.restore``.
+
+    Its photo files stay on disk until ``store.purge`` (the UI calls it when the
+    "Annuler" toast expires). The other fields are only used by RemoteStore.
+    """
+
+    recipe: Recipe
+    index: int = 0
+    meta: dict | None = None
+    server_delete_pending: bool = False
+    conflicts: list = field(default_factory=list)
+
+
+def copy_as_variant(store, recipe: Recipe) -> Recipe:
+    """Add "<nom> (variante)" to ``store``: new id, photos copied into the copy's own folder."""
+    copy = Recipe.from_dict(recipe.to_dict())
+    copy.id = Recipe(nom="").id
+    copy.nom = f"{recipe.nom} (variante)"
+    copy.favori = False
+    copy.cree_le = datetime.now().isoformat(timespec="seconds")
+    copy.modifie_le = ""
+    sources = store.image_paths(recipe)
+    copy.images = []
+    store.add(copy)
+    for source in sources:
+        store.add_image(copy, source)
+    return copy
 
 
 class RecipeStore:
@@ -174,10 +206,34 @@ class RecipeStore:
             self._recipes.append(recipe)
         self.save()
 
-    def delete(self, recipe_id: str) -> None:
-        self._recipes = [r for r in self._recipes if r.id != recipe_id]
-        shutil.rmtree(self.images_root / recipe_id, ignore_errors=True)
+    def duplicate(self, recipe_id: str) -> Recipe | None:
+        """Copy a recipe as "<nom> (variante)" (own id, own photo files)."""
+        recipe = self.get(recipe_id)
+        return copy_as_variant(self, recipe) if recipe else None
+
+    def delete(self, recipe_id: str, keep_files: bool = False) -> Trashed | None:
+        """Delete a recipe. With ``keep_files`` the photos stay until ``purge``."""
+        index = next((i for i, r in enumerate(self._recipes) if r.id == recipe_id), None)
+        if index is None:
+            return None
+        trashed = Trashed(self._recipes.pop(index), index)
+        if not keep_files:
+            shutil.rmtree(self.images_root / recipe_id, ignore_errors=True)
         self.save()
+        return trashed
+
+    def restore(self, trashed: Trashed) -> Recipe:
+        """Undo ``delete(keep_files=True)``: same id, photos, favourite flag and position."""
+        recipe = trashed.recipe
+        if self.get(recipe.id) is None:
+            self._recipes.insert(min(trashed.index, len(self._recipes)), recipe)
+            self.save()
+        return recipe
+
+    def purge(self, trashed: Trashed) -> None:
+        """Remove the photo files of a deleted recipe for good (no-op if it was restored)."""
+        if self.get(trashed.recipe.id) is None:
+            shutil.rmtree(self.images_root / trashed.recipe.id, ignore_errors=True)
 
     def toggle_favorite(self, recipe_id: str) -> bool:
         recipe = self.get(recipe_id)

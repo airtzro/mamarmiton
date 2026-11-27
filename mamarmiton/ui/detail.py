@@ -116,6 +116,9 @@ class DetailView(ctk.CTkFrame):
         self.btn_back.pack(side="left")
         self.btn_delete = theme.danger_button(bar, text="Supprimer", image=art.icon("trash", theme.DANGER, 17),
                                               compound="left", width=0, command=lambda: app.delete_recipe(self.recipe))
+        self.btn_variant = theme.secondary_button(bar, text="Créer une variante", width=0, compound="left",
+                                                  image=art.icon("copy", theme.TEXT, 17),
+                                                  command=lambda: app.duplicate_recipe(self.recipe))
         self.btn_edit = theme.primary_button(bar, text="Modifier", image=art.icon("pencil", theme.ON_ACCENT, 17),
                                              compound="left", width=0, command=lambda: app.edit_recipe(self.recipe))
         self.btn_share = theme.secondary_button(bar, text="Partager", image=art.icon("share", theme.TEXT, 17),
@@ -168,13 +171,14 @@ class DetailView(ctk.CTkFrame):
         r, app = self.recipe, self.app
         if r is None:
             return
-        for button in (self.btn_delete, self.btn_edit, self.btn_share, self.btn_fav):
+        for button in (self.btn_delete, self.btn_variant, self.btn_edit, self.btn_share, self.btn_fav):
             button.pack_forget()
         can_delete, can_edit = app.can_delete(r), app.can_edit(r)
         if can_delete:
             self.btn_delete.pack(side="right", padx=(8, 10))
         if can_edit:
             self.btn_edit.pack(side="right", padx=(8, 0 if can_delete else 10))
+        self.btn_variant.pack(side="right", padx=(8, 0 if (can_edit or can_delete) else 10))
         if app.is_remote and app.is_owner(r):
             self.btn_share.pack(side="right", padx=(8, 0))
         self.btn_fav.pack(side="right", padx=(0, 0 if (can_edit or can_delete) else 10))
@@ -391,6 +395,7 @@ class DetailView(ctk.CTkFrame):
         self._compact = compact
         self.btn_delete.configure(text="" if compact else "Supprimer")
         self.btn_share.configure(text="" if compact else "Partager")
+        self.btn_variant.configure(text="" if compact else "Créer une variante")
         self._update_fav_button()
 
     def _apply_layout(self, wide: bool, two_cols: bool, stacked: bool, width: int) -> None:
