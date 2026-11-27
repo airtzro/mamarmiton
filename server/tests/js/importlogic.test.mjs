@@ -14,7 +14,7 @@ test("status: an old server (no answer, not available, junk) means no import", (
   assert.equal(normalizeStatus({ available: false, ocr: true }), null);
   assert.equal(normalizeStatus("yes"), null);
   const s = normalizeStatus({ available: true });
-  assert.deepEqual(s, { ocr: false, ai: false, url: false, maxFiles: 8, maxMb: 30, accepts: DEFAULT_ACCEPTS });
+  assert.deepEqual(s, { ocr: false, ai: false, url: false, maxFiles: 8, maxMb: 30, accepts: DEFAULT_ACCEPTS, aiCredits: null });
   assert.deepEqual(normalizeStatus({ available: true, max_files: -1, max_mb: "x", accepts: [".PDF", "nope", ".txt"] }).accepts, [".pdf", ".txt"]);
 });
 
@@ -151,4 +151,14 @@ test("draftFromImport takes the website photo as the dish photo", () => {
   assert.equal(draft.recipe.nom, "Gratin");
   assert.equal(draft.dishPhoto.type, "image/jpeg");
   assert.equal(draftFromImport({ recipe: { nom: "Gratin" }, photo: null }).dishPhoto, null);
+});
+
+test("ai credits: shown only when the plan has AI and the server has the model", async () => {
+  const { aiCredits, aiCreditsText } = await import("../../mamarmiton_server/web/importlogic.js");
+  assert.equal(aiCredits({ ai: true, ai_allowance: 0, ai_left: 0 }), null);  // base
+  assert.equal(aiCredits({ ai: false, ai_allowance: 30, ai_left: 12 }), null);  // no model on the server
+  assert.equal(aiCredits({ ai: true }), null);  // older server
+  assert.deepEqual(aiCredits({ ai: true, ai_allowance: 30, ai_left: 12 }), { left: 12, allowance: 30 });
+  assert.match(aiCreditsText({ left: 12, allowance: 30 }), /12 sur 30/);
+  assert.match(aiCreditsText({ left: 0, allowance: 30 }), /lecture simple/);
 });

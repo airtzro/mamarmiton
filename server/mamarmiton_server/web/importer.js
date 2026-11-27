@@ -5,7 +5,7 @@ import { api } from "./api.js";
 import { hit } from "./usage.js";
 import { h, icon, clear } from "./dom.js";
 import { openDialog } from "./ui.js";
-import { NO_OCR_MESSAGE, acceptAttribute, addFiles, draftFromImport, formatSize, kindOf, normalizeStatus, urlProblem } from "./importlogic.js";
+import { NO_OCR_MESSAGE, acceptAttribute, addFiles, draftFromImport, formatSize, kindOf, normalizeStatus, urlProblem, aiCredits, aiCreditsText } from "./importlogic.js";
 
 const GIVE_UP_MS = 200_000;  // the NAS can take two minutes: never cut it short before that
 const GIVE_UP_URL_MS = 70_000;  // a website answers in seconds (the server stops at 45 s)
@@ -26,6 +26,12 @@ export function loadImportStatus() {
     }).then(() => status).finally(() => { asking = null; });
   }
   return asking;
+}
+
+/** After an import: fetch the credits left again, quietly (the next dialog shows them). */
+function refreshCredits() {
+  if (!status || !status.aiCredits) return;
+  api.importStatus().then((raw) => { if (status) status = { ...status, aiCredits: aiCredits(raw || {}) }; }, () => {});
 }
 
 /** After a sign-out: the next account may be on another server version. */
@@ -110,6 +116,7 @@ export function openImportDialog({ onDone }) {
       const form = h("div", { class: "stack" },
         h("p", { text: `Une recette prise en photo, un fichier, un texte${st.url ? " ou l'adresse d'un site" : ""} : Mamarmiton la recopie pour vous, puis vous la vérifiez.` }),
         st.ocr ? null : h("p", { class: "import-note", text: NO_OCR_MESSAGE }),
+        st.aiCredits ? h("p", { class: "hint import-credits", text: aiCreditsText(st.aiCredits) }) : null,
         choices, list, more, textBox, urlBox, errors,
         h("p", { class: "hint import-drop-hint", text: "Vous pouvez aussi glisser des fichiers dans cette fenêtre." }),
         actions);
@@ -181,6 +188,7 @@ export function openImportDialog({ onDone }) {
             : await api.importRecipe(sent, text.value, controller.signal);
           if (closed) return;
           if (fromSite) hit("url_import");
+          else refreshCredits();
           const draft = draftFromImport(result, sent);
           waiting = false;
           close();

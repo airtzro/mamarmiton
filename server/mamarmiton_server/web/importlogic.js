@@ -23,7 +23,24 @@ export function normalizeStatus(raw) {
     maxFiles: posInt(raw.max_files, 8),
     maxMb: posInt(raw.max_mb, 30),
     accepts: accepts.length ? accepts : DEFAULT_ACCEPTS,
+    aiCredits: aiCredits(raw),
   };
+}
+
+/** {left, allowance} when this account has AI imports in its plan (and the server has the model), else null. */
+export function aiCredits(raw) {
+  const n = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.floor(Number(v))) : null);
+  const allowance = n(raw.ai_allowance);
+  const left = n(raw.ai_left);
+  if (raw.ai !== true || !allowance || left === null) return null;
+  return { left: Math.min(left, allowance), allowance };
+}
+
+/** The sentence the import dialog shows about AI credits. */
+export function aiCreditsText(credits) {
+  if (!credits) return "";
+  if (credits.left === 0) return `Vos ${credits.allowance} imports IA du mois sont utilisés : les recettes sont lues en lecture simple jusqu'au mois prochain.`;
+  return `Imports IA restants ce mois-ci : ${credits.left} sur ${credits.allowance}.`;
 }
 
 export function extensionOf(name) {
