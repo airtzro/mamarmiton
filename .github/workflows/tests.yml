@@ -1,0 +1,48 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  desktop:
+    name: Desktop tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install Tk and Xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-tk xvfb
+      # llama-cpp-python is the optional "ai" extra and is imported lazily,
+      # so "dev" alone is enough (and avoids compiling a C++ library).
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Test (desktop, under a virtual display)
+        run: xvfb-run -a python -m pytest -q
+
+  server:
+    name: Server tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            server/pyproject.toml
+      # The server only needs the recipe model from the desktop package.
+      - name: Install
+        run: |
+          pip install --no-deps -e .
+          pip install -e "./server[dev]"
+      - name: Test (server)
+        working-directory: server
+        run: python -m pytest -q
+      - name: Test (desktop client against a real server)
+        run: python -m pytest -q tests/test_remote.py

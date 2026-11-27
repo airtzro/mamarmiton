@@ -1,5 +1,7 @@
 # MAMARMITON
 
+[![tests](https://github.com/airtzro/mamarmiton/actions/workflows/tests.yml/badge.svg)](https://github.com/airtzro/mamarmiton/actions/workflows/tests.yml)
+
 A desktop recipe book (in French), built with Python and [customtkinter](https://github.com/TomSchimansky/CustomTkinter).
 You can type recipes in by hand or import them from PDF files. A small AI model runs **locally** to read the PDFs. Nothing is sent online.
 

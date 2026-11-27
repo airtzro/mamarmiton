@@ -51,6 +51,6 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 
 ## Tech debt to keep in mind
 
-- No automated GUI tests yet (the logic is covered by `pytest`). A smoke test that builds `App` under Xvfb in CI would catch regressions.
-- No CI. Add a GitHub Actions workflow that runs `pytest` and builds the `.exe` on `windows-latest` for each tag.
+- ~~No automated GUI tests yet.~~ **Done**: `tests/test_ui_smoke.py` builds `App` and walks home, detail and editor (runs under Xvfb in CI, skipped without a display).
+- ~~No CI.~~ **Done**: `.github/workflows/tests.yml` runs the desktop and server tests on every push and pull request. Still to do: build the `.exe` on `windows-latest` for each tag.
 - The rule-based parser struggles with multi-column PDF layouts. pdfplumber's `extract_words` with x-positions could rebuild the columns.
