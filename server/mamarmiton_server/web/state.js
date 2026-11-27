@@ -10,7 +10,7 @@ export const state = {
   entries: new Map(),       // id -> server entry {id, recipe, version, owner, access, images}
   favorites: new Set(),
   seq: 0,
-  filters: { text: "", category: "", tags: [], sort: "Favoris d'abord" },
+  filters: { text: "", category: "", tags: [], sort: "Favoris d'abord", book: null },  // book: see books.js; null = not loaded yet
 };
 
 export function resetState() {
@@ -20,7 +20,7 @@ export function resetState() {
   state.entries = new Map();
   state.favorites = new Set();
   state.seq = 0;
-  state.filters = { text: "", category: "", tags: [], sort: "Favoris d'abord" };
+  state.filters = { text: "", category: "", tags: [], sort: "Favoris d'abord", book: null };
   photos.clear();
 }
 

@@ -146,7 +146,7 @@ export function renderDetail(main, id, { onEdit, onGone, onChange }) {
       recipe.tags.length
         ? h("p", { class: "tag-list" }, recipe.tags.map((tag) => h("button", {
           class: "chip chip-btn chip-tag", type: "button", title: `Voir les recettes « ${tag} »`,
-          onClick: () => { state.filters.text = ""; state.filters.category = ""; state.filters.tags = [tag]; hit("tag_filter"); location.hash = "#/"; },
+          onClick: () => { state.filters.text = ""; state.filters.category = ""; state.filters.book = ""; state.filters.tags = [tag]; hit("tag_filter"); location.hash = "#/"; },
           text: `#${tag}` })))
         : null,
       h("h1", { class: "serif", text: recipe.nom }),
