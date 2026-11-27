@@ -130,8 +130,11 @@ class ShoppingView(ctk.CTkFrame):
         self._two_cols = None
         selection = self._selection()
         self.items = build_list(selection)
-        # no pruning here: recipes missing from this book may belong to the other account's book
-        # (or not be synced yet); deleted recipes are removed from the list by App.delete_recipe
+        # recipes missing from this book may belong to the other account's book (or not be synced yet), so
+        # they are kept; deleted recipes are removed by App.delete_recipe. Stale ticks are only dropped when
+        # every recipe of the list is here, otherwise a later recipe with the same ingredient shows up ticked.
+        if len(selection) == len(self.app.shopping.recipes):
+            self.app.shopping.checked &= {i.key for i in self.items}
 
         head = ctk.CTkFrame(self.body, fg_color="transparent")
         head.grid(row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(4, 18))
