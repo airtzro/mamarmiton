@@ -212,6 +212,7 @@ async function queueFav(id, on) {
  * Throws ApiError otherwise, including the 409 conflict (detail.current).
  */
 export async function saveRecipe(id, recipe, base) {
+  await flushDone();
   if ((await queuedFor(id)).length === 0) {
     try { return { entry: await api.putRecipe(id, recipe, base) }; }
     catch (e) { if (!e.offline) throw e; }
@@ -221,6 +222,7 @@ export async function saveRecipe(id, recipe, base) {
 }
 
 export async function deleteRecipe(id) {
+  await flushDone();
   if ((await queuedFor(id)).length === 0) {
     try { await api.deleteRecipe(id); dropRecipe(id); await persist(); return { queued: false }; }
     catch (e) { if (!e.offline) throw e; }
@@ -230,6 +232,7 @@ export async function deleteRecipe(id) {
 }
 
 export async function setFavorite(id, on) {
+  await flushDone();
   if ((await queuedFor(id)).length === 0) {
     try {
       await api.setFavorite(id, on);
@@ -291,6 +294,9 @@ async function runOp(op, later, changed) {
 
 let flushing = null;
 
+/** Wait for a running flush: a queued edit rewritten while it is being sent would be deleted unsent. */
+const flushDone = async () => { if (flushing) await flushing.catch(() => {}); };
+
 /** Send the offline edits, oldest first. Returns {left, changed, error}. */
 export function flush() {
   if (!state.me) return Promise.resolve({ left: 0, changed: new Set(), error: null });
@@ -307,7 +313,8 @@ async function doFlush() {
     try {
       await runOp(op, ops.slice(i + 1), changed);
     } catch (e) {
-      if (isOfflineError(e) || e.status === 401 || !(e instanceof ApiError)) { error = e; break; }
+      // no connection, signed out, or a server that is struggling (5xx, 429): keep the edit and retry later
+      if (isOfflineError(e) || e.status === 401 || e.status === 429 || e.status >= 500 || !(e instanceof ApiError)) { error = e; break; }
       toast(`Une modification faite hors ligne n'a pas pu être envoyée : ${e.message}`, "error");  // refused for good: drop it
     }
     await store.outboxDelete(op.uid);

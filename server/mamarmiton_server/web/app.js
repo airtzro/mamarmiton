@@ -51,6 +51,7 @@ function showLogin(message = "") {
   clearInterval(timer);
   token.clear();
   resetState();
+  paintOffline();  // the pending-edits badge belongs to the user who just left
   leaveCookMode();
   view = null;
   document.querySelectorAll("dialog").forEach((d) => d.close());
@@ -60,9 +61,9 @@ function showLogin(message = "") {
 
 async function signOut() {
   const name = state.me && state.me.username;
+  showLogin("");  // first: an in-flight sync must not write the copy back after it is erased
   if (name) { await store.clearUser(name); clearShopping(name); }  // this user's copy, unsent edits and shopping list leave the device
   forgetPhotosOnDevice();
-  showLogin("");
 }
 
 async function start(user) {

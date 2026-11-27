@@ -33,8 +33,10 @@ export function openKitchen(recipe, { servings, start = 0, onClose } = {}) {
   async function keepAwake() {
     try {
       if (!closed && "wakeLock" in navigator && !wakeLock) {
-        wakeLock = await navigator.wakeLock.request("screen");
-        wakeLock.addEventListener("release", () => { wakeLock = null; });
+        const lock = await navigator.wakeLock.request("screen");
+        if (closed) { lock.release().catch(() => {}); return; }  // closed while the browser was answering
+        wakeLock = lock;
+        lock.addEventListener("release", () => { if (wakeLock === lock) wakeLock = null; });
       }
     } catch { wakeLock = null; /* refused or unsupported: the screen may simply dim */ }
   }
