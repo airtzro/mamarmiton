@@ -256,7 +256,7 @@ def _draw_ingredients(lay: _Layout, r: Recipe) -> None:
 
     def rows(item) -> tuple[list[tuple[str, object, float]], str, float]:
         """Printed lines as (text, font, x offset), plus the quantity shown inline on line 1."""
-        qty = item.quantite.strip()
+        qty = " ".join(item.quantite.split())  # a line break would make Pillow's layout fail
         avail = col_w - bullet
         shift = _text_w(bold, qty + "  ") if qty else 0
         if qty and shift > avail * 0.5:  # very long quantity: give it its own lines

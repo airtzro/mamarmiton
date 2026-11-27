@@ -36,3 +36,10 @@ def test_normalize_url_keeps_existing_escapes():
 
 def test_normalize_url_leaves_host_alone():
     assert web.normalize_url("https://café.fr/recette") == "https://café.fr/recette"
+
+
+def test_pdf_export_survives_line_break_in_quantity():
+    from mamarmiton import export
+    from mamarmiton.models import Ingredient
+    recipe = Recipe(nom="Tarte", ingredients=[Ingredient("farine", "100 g\nenviron"), Ingredient("sel", "")])
+    assert len(export.render_recipe_pages(recipe, dpi=40)) == 1
