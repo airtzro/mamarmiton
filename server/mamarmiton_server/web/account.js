@@ -1,8 +1,9 @@
 import { api, token } from "./api.js";
 import { h, icon, clear } from "./dom.js";
-import { pendingCount, state } from "./state.js";
+import { pendingCount, state, sync } from "./state.js";
 import { busy, confirmDialog, openDialog, toast } from "./ui.js";
-import { EXPLANATION, setUsageEnabled, usageEnabled } from "./usage.js";
+import { EXPLANATION, hit, setUsageEnabled, usageEnabled } from "./usage.js";
+import { BACKUP_ACCEPT, OFFLINE_MESSAGE, backupFileName, importSummary } from "./backuplogic.js";
 import { buildReport } from "./diagnostics.js";
 
 function field(label, input) {
@@ -76,6 +77,47 @@ export function openReportDialog() {
   });
 }
 
+/** "Mes recettes": download a backup of my book, or add the recipes of a backup file. */
+function backupSection() {
+  const message = h("p", { class: "form-error", role: "alert" });
+  const say = (err) => { message.textContent = err.offline ? OFFLINE_MESSAGE : err.message; };
+  const download = h("button", { class: "btn btn-secondary btn-big", type: "button" }, icon("download", 20), "Télécharger une sauvegarde");
+  download.addEventListener("click", () => busy(download, async () => {
+    message.textContent = "";
+    try {
+      const url = URL.createObjectURL(await api.exportBackup());
+      const link = h("a", { href: url, download: backupFileName() });
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);  // after the browser has started the download
+      hit("backup_export");
+      toast("Votre sauvegarde est téléchargée.", "ok");
+    } catch (err) { say(err); }
+  }));
+  const picker = h("input", { type: "file", accept: BACKUP_ACCEPT, hidden: true });
+  const upload = h("button", { class: "btn btn-secondary btn-big", type: "button" }, icon("upload", 20), "Importer une sauvegarde");
+  upload.addEventListener("click", () => { message.textContent = ""; picker.click(); });
+  picker.addEventListener("change", () => {
+    const file = picker.files && picker.files[0];
+    picker.value = "";
+    if (!file) return;
+    busy(upload, async () => {
+      try {
+        const result = await api.importBackup(file);
+        hit("backup_import");
+        toast(importSummary(result), "ok");
+        try { await sync(); } catch { /* the next sync picks the new recipes up */ }
+        window.dispatchEvent(new Event("mamarmiton:data"));
+      } catch (err) { say(err); }
+    });
+  });
+  return h("div", { class: "stack" },
+    h("h3", { class: "serif", text: "Mes recettes" }),
+    h("p", { class: "muted", text: "Si vous aviez Mamarmiton sur ordinateur, choisissez le fichier « recette.json » de votre dossier Mamarmiton." }),
+    download, upload, picker, message);
+}
+
 /** "Mon compte": change password, invitation (admin), sign out. */
 export function openAccountDialog({ onSignOut }) {
   openDialog({
@@ -106,7 +148,7 @@ export function openAccountDialog({ onSignOut }) {
           h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: passwordForm }, icon("key", 20), "Changer mon mot de passe"),
           state.me.is_admin ? h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: inviteForm }, icon("plus", 20), "Créer une invitation") : null,
           h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: reportForm }, icon("pencil", 20), "Signaler un problème"),
-          privacy, signOut);
+          backupSection(), privacy, signOut);
       }
 
       function reportForm() { buildReportForm(body, { back: home, backText: "Retour", sent: home }); }

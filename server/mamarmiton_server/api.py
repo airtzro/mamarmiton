@@ -19,17 +19,20 @@ import re
 import secrets
 import shutil
 import sqlite3
+import tempfile
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Iterator, Literal
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 from mamarmiton.models import Recipe
 from mamarmiton.redact import redact
-from mamarmiton_server import __version__, admin, db, images, importer, security, usage
+from mamarmiton_server import __version__, admin, db, images, importer, portable, security, usage
 from mamarmiton_server.config import Settings
 
 log = logging.getLogger(__name__)
@@ -55,6 +58,9 @@ class BodyLimitMiddleware:
         self.image_limit = (settings.max_image_mb + 1) * 1024 * 1024
         # the files themselves are checked against import_max_mb; +1 MB for the form around them
         self.import_limit = (settings.import_max_mb + 1) * 1024 * 1024
+        self.backup_limit = (settings.backup_max_mb + 1) * 1024 * 1024
+        self.backup_message = json.dumps(
+            {"detail": f"Fichier trop lourd : {settings.backup_max_mb} Mo au maximum."}).encode()
         self.import_message = json.dumps(
             {"detail": f"Fichiers trop lourds : {settings.import_max_mb} Mo au maximum en tout."}).encode()
 
@@ -63,11 +69,13 @@ class BodyLimitMiddleware:
             return await self.app(scope, receive, send)
         is_upload = scope["method"] == "POST" and scope["path"].endswith("/images")
         is_import = scope["method"] == "POST" and scope["path"] == "/import/recipe"
-        limit = self.import_limit if is_import else self.image_limit if is_upload else MAX_JSON_BODY
+        is_backup = scope["method"] == "POST" and scope["path"] == "/import/backup"
+        limit = (self.backup_limit if is_backup else self.import_limit if is_import
+                 else self.image_limit if is_upload else MAX_JSON_BODY)
         started = False
 
         async def too_large():
-            body = self.import_message if is_import else b'{"detail":"Requ\xc3\xaate trop volumineuse."}'
+            body = self.backup_message if is_backup else self.import_message if is_import else b'{"detail":"Requ\xc3\xaate trop volumineuse."}'
             await send({"type": "http.response.start", "status": 413,
                         "headers": [(b"content-type", b"application/json"), (b"connection", b"close"),
                                     (b"content-length", str(len(body)).encode())]})
@@ -823,6 +831,134 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             bump(conn, "id = ?", (recipe_id,))
         (settings.images_dir / recipe_id / row["filename"]).unlink(missing_ok=True)
         return Response(status_code=204)
+
+    # ------------------------------------------------------- backup export / import
+    @app.get("/export")
+    def export_backup(user: Session, conn: Conn) -> FileResponse:
+        """My own recipes and their photos as one zip (layout in portable.py), built in a temp file."""
+        uid = user["id"]
+        favorites = {r[0] for r in conn.execute("SELECT recipe_id FROM favorites WHERE user_id = ?", (uid,))}
+        rows = conn.execute("SELECT id, data FROM recipes WHERE owner_id = ? AND deleted = 0 ORDER BY seq",
+                            (uid,)).fetchall()
+        tmp = tempfile.NamedTemporaryFile(prefix=".export-", suffix=".zip", dir=settings.data_dir, delete=False)
+        path = Path(tmp.name)
+        try:
+            recipes = []
+            with tmp, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as archive:
+                for row in rows:
+                    data = json.loads(row["data"])
+                    names = []
+                    pics = conn.execute("SELECT filename FROM images WHERE recipe_id = ? ORDER BY position, created_at",
+                                        (row["id"],)).fetchall()
+                    for pic in pics:
+                        source = settings.images_dir / row["id"] / pic["filename"]
+                        if source.is_file():
+                            archive.write(source, f"images/{row['id']}/{pic['filename']}", zipfile.ZIP_STORED)
+                            names.append(pic["filename"])
+                    recipes.append({**data, "id": row["id"], "favori": row["id"] in favorites, "images": names})
+                archive.writestr("recettes.json", json.dumps(recipes, ensure_ascii=False, indent=1))
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        return FileResponse(path, media_type="application/zip",
+                            filename=f"mamarmiton-sauvegarde-{datetime.now():%Y-%m-%d}.zip",
+                            background=BackgroundTask(path.unlink, missing_ok=True))
+
+    @app.post("/import/backup")
+    def import_backup(user: Session, conn: Conn, file: UploadFile = File(...)) -> dict:
+        """Add the recipes of a backup (our zip, a desktop recette.json, or a zipped desktop folder) to my book.
+
+        A recipe I already own is skipped; one whose id belongs to someone else gets a new id.
+        All recipes go in one transaction; photos go through the same checks as uploads."""
+        source = file.file
+        archive = None
+        try:
+            if zipfile.is_zipfile(source):
+                archive = portable.BackupZip(source, max_file=settings.max_image_mb * 1024 * 1024)
+                raw, prefix = archive.locate()
+            else:
+                source.seek(0)
+                raw, prefix = source.read(portable.MAX_JSON_BYTES + 1), ""
+                if len(raw) > portable.MAX_JSON_BYTES:
+                    raise portable.BadBackup("Ce fichier est trop gros pour être une liste de recettes.")
+            items = portable.decode_recipes(raw)
+            del raw
+            return _import_items(conn, user, items, archive, prefix)
+        except portable.BadBackup as exc:
+            raise _error(422, str(exc)) from exc
+        finally:
+            if archive:
+                archive.close()
+
+    def _import_items(conn: sqlite3.Connection, user: sqlite3.Row, items: list, archive, prefix: str) -> dict:
+        uid = user["id"]
+        added = skipped = invalid = photos = 0
+        written: list[Path] = []
+        try:
+            with db.transaction(conn):
+                count = conn.execute("SELECT COUNT(*) FROM recipes WHERE owner_id = ? AND deleted = 0",
+                                     (uid,)).fetchone()[0]
+                seen: set[str] = set()
+                for item in items:
+                    try:
+                        parsed = Recipe.from_dict(item)
+                        old_id = parsed.id
+                        new_id = old_id if valid_recipe_id(old_id) else secrets.token_hex(16)
+                        data = clean_recipe(item, new_id)
+                    except (HTTPException, ValueError, TypeError, OverflowError):
+                        invalid += 1
+                        continue
+                    row = conn.execute("SELECT owner_id, deleted, version, author_id, author_name, variant_of, "
+                                       "variant_of_nom FROM recipes WHERE id = ?", (new_id,)).fetchone()
+                    if new_id in seen or (row and row["owner_id"] == uid and not row["deleted"]):
+                        skipped += 1  # already there (or twice in the file): never duplicate
+                        continue
+                    if row and row["owner_id"] == uid:  # one I deleted: it comes back, keeping its credit
+                        version = row["version"] + 1
+                        credit = (row["author_id"], row["author_name"], row["variant_of"], row["variant_of_nom"])
+                    else:
+                        if row:  # someone else's id: this copy is a new recipe
+                            new_id = secrets.token_hex(16)
+                            data["id"] = new_id
+                        version, credit = 1, credit_for_new(conn, user, None)
+                    seen.add(new_id)
+                    count += 1
+                    if count > MAX_RECIPES_PER_USER:
+                        raise _error(409, "Trop de recettes dans ce livre.")
+                    insert_recipe(conn, new_id, uid, data, version, credit)
+                    added += 1
+                    if parsed.favori:
+                        conn.execute("INSERT OR IGNORE INTO favorites VALUES (?, ?)", (uid, new_id))
+                    if archive is None or not (isinstance(item, dict) and isinstance(item.get("id"), str)):
+                        continue  # photos are found under the id the file gave the recipe
+                    attached = 0
+                    for name in parsed.images[:settings.max_images_per_recipe]:
+                        raw = archive.photo(prefix, old_id, name)
+                        if raw is None:
+                            continue
+                        try:
+                            pic, ext, content_type = images.process(raw)
+                        except images.BadImage:
+                            continue
+                        image_id = secrets.token_hex(16)
+                        filename = f"{image_id}.{ext}"
+                        folder = settings.images_dir / new_id
+                        folder.mkdir(parents=True, exist_ok=True)
+                        (folder / filename).write_bytes(pic)
+                        written.append(folder / filename)
+                        conn.execute("INSERT INTO images VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                     (image_id, new_id, filename, content_type, len(pic), attached, db.now()))
+                        attached += 1
+                    photos += attached
+        except BaseException:
+            for path in written:  # the transaction rolled back: its files must not stay behind
+                path.unlink(missing_ok=True)
+                try:
+                    path.parent.rmdir()
+                except OSError:
+                    pass
+            raise
+        return {"added": added, "skipped": skipped, "invalid": invalid, "photos": photos}
 
     @app.put("/recipes/{recipe_id}/hidden", status_code=204)
     def hide_recipe(recipe_id: str, user: Session, conn: Conn) -> Response:

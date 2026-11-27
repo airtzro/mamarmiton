@@ -30,6 +30,9 @@ class Settings:
     min_desktop_version: str = field(default_factory=lambda: (
         os.environ.get("MAMARMITON_MIN_DESKTOP_VERSION") or os.environ.get("MIN_DESKTOP_VERSION") or "").strip())
 
+    # backup upload (.json or .zip, see portable.py)
+    backup_max_mb: int = field(default_factory=lambda: _int("MAMARMITON_BACKUP_MAX_MB", 300))
+
     # "import automatique": files -> recipe (OCR with Tesseract, optional local model)
     import_max_mb: int = field(default_factory=lambda: _int("MAMARMITON_IMPORT_MAX_MB", 30))  # all files together
     import_daily: int = field(default_factory=lambda: _int("MAMARMITON_IMPORT_DAILY", 40))  # per account

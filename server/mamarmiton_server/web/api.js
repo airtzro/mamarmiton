@@ -123,6 +123,15 @@ export const api = {
     return json(request("POST", "/import/recipe", { form, signal }));
   },
 
+  /** My recipes and photos as a zip (a Blob). */
+  async exportBackup() { return (await request("GET", "/export")).blob(); },
+  /** Add the recipes of a backup (.json or .zip) to my book: {added, skipped, invalid, photos}. */
+  importBackup(file) {
+    const form = new FormData();
+    form.append("file", file, file.name || "sauvegarde.json");
+    return json(request("POST", "/import/backup", { form }));
+  },
+
   shares: () => json(request("GET", "/shares")),
   shareBook: (name, can_edit, can_copy) => request("PUT", `/shares/book/${user(name)}`, { json: { can_edit, can_copy } }),
   unshareBook: (name) => request("DELETE", `/shares/book/${user(name)}`),
