@@ -370,13 +370,11 @@ class HomeView(ctk.CTkFrame):
         button = dict(compound="left", width=min(280, wrap), height=46)
         if total == 0:
             say("Votre carnet est encore vide",
-                "Ajoutez votre première recette : écrivez-la, ou importez-la depuis un PDF ou un site.")
+                "Ajoutez votre première recette : écrivez-la, ou importez-la (un PDF, une photo, un site…).")
             theme.primary_button(inner, text="Écrire une recette", image=art.icon("pencil", theme.ON_ACCENT, 17),
                                  command=self.app.new_recipe, **button).pack()
-            theme.secondary_button(inner, text="Importer un PDF", image=art.icon("pdf", theme.TEXT, 17),
-                                   command=self.app.import_pdf, **button).pack(pady=(10, 0))
-            theme.secondary_button(inner, text="Importer depuis un site", image=art.icon("globe", theme.TEXT, 17),
-                                   command=self.app.import_url, **button).pack(pady=(10, 0))
+            theme.secondary_button(inner, text="Importer une recette", image=art.icon("pdf", theme.TEXT, 17),
+                                   command=self.app.import_recipe, **button).pack(pady=(10, 0))
         elif filtered:
             say("Aucune recette ne correspond", "Essayez un autre mot, ou enlevez un filtre.")
             theme.secondary_button(inner, text="Effacer les filtres", image=art.icon("reset", theme.TEXT, 16),

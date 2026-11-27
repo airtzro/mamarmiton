@@ -29,7 +29,7 @@ from mamarmiton.ui import art, remote_logic as rl, theme
 from mamarmiton.ui.account import AccountDialog
 from mamarmiton.ui.conflicts import ConflictDialog
 from mamarmiton.ui.detail import DetailView
-from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, ReportDialog, UrlImportDialog, ask_image, ask_pdf
+from mamarmiton.ui.dialogs import HelpDialog, ReportDialog, UrlImportDialog, ask_image
 from mamarmiton.ui.editor import EditorView
 from mamarmiton.ui.home import HomeView
 from mamarmiton.ui.shopping import ShoppingView
@@ -184,16 +184,23 @@ class Sidebar(ctk.CTkFrame):
 
     def _place_help(self) -> None:
         """"Aide et réglages" is a row of its own, or (compact) a settings button beside the account."""
-        self.btn_help_small.pack_forget()
-        self.btn_help_box.grid_remove()
-        if not self.compact:
+        remote = self._account_mode == "remote"
+        small = self.compact and not remote
+        boxed = self.compact and remote  # inside the account box, so its status keeps the full width
+        if not self.compact and not self._help_row.winfo_manager():
             self._help_row.pack(fill="x", after=self.account_row)
-            return
-        self._help_row.pack_forget()
-        if self._account_mode == "remote":  # inside the account box, so its status keeps the full width
-            self.btn_help_box.grid()
-        else:
-            self.btn_help_small.pack(side="right", padx=(6, 0), before=self.btn_login)
+        elif self.compact and self._help_row.winfo_manager():
+            self._help_row.pack_forget()
+        if small != bool(self.btn_help_small.winfo_manager()):
+            if small:
+                self.btn_help_small.pack(side="right", padx=(6, 0), before=self.btn_login)
+            else:
+                self.btn_help_small.pack_forget()
+        if boxed != bool(self.btn_help_box.winfo_manager()):
+            if boxed:
+                self.btn_help_box.grid()
+            else:
+                self.btn_help_box.grid_remove()
 
     def _show_tagline(self) -> None:
         if self.narrow or self.compact:
@@ -762,14 +769,16 @@ class App(ctk.CTk):
                                 "Ouvrez-le avec votre lecteur PDF pour l'imprimer.", parent=self)
 
     def import_recipe(self) -> None:
-        self.import_pdf()
+        """"Importer une recette": a file or photos, a web page, or pasted text."""
+        if self.kitchen is not None or not self.can_leave_editor():
+            return
+        from mamarmiton.ui.import_dialog import ImportRecipeDialog
+
+        ImportRecipeDialog(self, self)
 
     def import_pdf(self) -> None:
-        if not self.can_leave_editor():
-            return
-        path = ask_pdf(self)
-        if path:
-            ImportDialog(self, path, self.settings.use_ai, self._review_import)
+        """Former "Importer un PDF" entry point: the import dialog handles PDFs now."""
+        self.import_recipe()
 
     def import_url(self) -> None:
         if not self.can_leave_editor():
@@ -784,7 +793,7 @@ class App(ctk.CTk):
             notes = [f"Recette lue {'par l’IA' if result.method == 'IA' else 'automatiquement'} : vérifiez-la avant d'enregistrer."]
         notes += result.warnings
         if result.images:
-            origin = "le site" if result.method == "site" else "le PDF"
+            origin = result.origin or ("le site" if result.method == "site" else "le PDF")
             notes.append(f"{len(result.images)} photo(s) trouvée(s) dans {origin} seront ajoutées.")
 
         def save(recipe: Recipe) -> None:

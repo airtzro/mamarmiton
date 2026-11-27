@@ -23,6 +23,7 @@ import httpx
 from mamarmiton import __version__
 
 TIMEOUT = 15.0
+IMPORT_TIMEOUT = 240.0  # the server's OCR + local AI can take about two minutes on the NAS
 
 
 class ApiError(Exception):
@@ -93,8 +94,9 @@ class ApiClient:
             raise OfflineError() from exc
         if response.status_code == 426:
             raise self._upgrade_required(response)
-        if response.status_code >= 500:
-            raise OfflineError("Le serveur ne répond pas correctement.", response.status_code)
+        if response.status_code >= 500:  # keep a French reason when the server gave one (e.g. 503 "busy")
+            raise OfflineError(self._detail(response) or "Le serveur ne répond pas correctement.",
+                               response.status_code)
         if response.status_code >= 400:
             raise self._error(response)
         if raw:
@@ -113,6 +115,15 @@ class ApiClient:
         except (ValueError, AttributeError):
             pass
         return UpgradeRequired(message, minimum)
+
+    @staticmethod
+    def _detail(response: httpx.Response) -> str:
+        """The ``detail`` sentence of a JSON error answer, "" when there is none."""
+        try:
+            detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            return ""
+        return detail.strip() if isinstance(detail, str) else ""
 
     @staticmethod
     def _error(response: httpx.Response) -> ApiError:
@@ -214,6 +225,38 @@ class ApiClient:
 
     def delete_image(self, recipe_id: str, image_id: str) -> None:
         self._request("DELETE", f"/recipes/{recipe_id}/images/{image_id}")
+
+    # -------------------------------------------------------- recipe import
+    def import_status(self) -> dict:
+        """What the server can read: ``{available, ocr, ai, max_files, max_mb, accepts}``.
+
+        A server without the import (older version) answers ``{"available": False}``.
+        """
+        try:
+            data = self._request("GET", "/import/status")
+        except ApiError as exc:
+            if exc.status in (404, 405) and not isinstance(exc, (AuthError, OfflineError)):
+                return {"available": False}
+            raise
+        return data if isinstance(data, dict) else {"available": False}
+
+    def import_recipe(self, paths: list[Path | str], text: str | None = None) -> dict:
+        """Send files (pages, photos, documents) and/or text; the server reads the recipe.
+
+        Returns ``{recipe, dish_photo, method, warnings}``; ``dish_photo`` is an index into ``paths``.
+        Reading can take a couple of minutes on the server, hence the long timeout.
+        """
+        files = []
+        for path in paths:
+            path = Path(path)
+            content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            files.append(("files", (path.name, path.read_bytes(), content_type)))
+        if text and text.strip():
+            files.append(("text", (None, text)))  # a plain form field, so the body is always multipart
+        if not files:
+            raise ValueError("Rien à importer : choisissez un fichier ou collez un texte.")
+        return self._request("POST", "/import/recipe", files=files,
+                             timeout=httpx.Timeout(IMPORT_TIMEOUT, connect=TIMEOUT))
 
     # -------------------------------------------------------------- shares
     def shares(self) -> dict:
