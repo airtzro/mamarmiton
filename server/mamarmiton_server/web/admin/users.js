@@ -24,6 +24,8 @@ export async function renderUsers(main, ctx) {
         h("span", { class: "row wrap tight" },
           user.is_admin ? pill("admin", "accent") : null, user.is_me ? pill("vous", "muted") : null,
           user.invite_note ? h("span", { class: "hint", text: `invité·e : « ${user.invite_note} »` }) : null))),
+    h("td", { "data-label": "Formule" }, pill(user.tier === "plus" ? "Plus" : "Base", user.tier === "plus" ? "accent" : "muted"),
+      h("div", { class: "hint", text: user.ai_allowance ? `IA : ${user.ai_used} / ${user.ai_allowance} ce mois` : "sans IA" })),
     h("td", { "data-label": "Recettes", text: String(user.recipes) }),
     h("td", { "data-label": "Photos", text: user.photos ? `${user.photos} (${bytes(user.photo_bytes)})` : "0" }),
     h("td", { "data-label": "Appareils", text: String(user.devices) }),
@@ -39,7 +41,7 @@ export async function renderUsers(main, ctx) {
       action("Inviter quelqu'un", () => newInvite(), { tone: "primary", iconName: "plus" })),
     h("div", { class: "card table-wrap" },
       h("table", { class: "data-table responsive" },
-        h("thead", {}, h("tr", {}, ["Personne", "Recettes", "Photos", "Appareils", "Vu", "Partages", "Depuis", ""].map((t) =>
+        h("thead", {}, h("tr", {}, ["Personne", "Formule", "Recettes", "Photos", "Appareils", "Vu", "Partages", "Depuis", ""].map((t) =>
           h("th", { scope: "col", text: t })))),
         h("tbody", {}, rows))),
     h("p", { class: "hint", text: "« Vu » est mis à jour au plus une fois par heure, quand un appareil se synchronise." }));
@@ -85,6 +87,40 @@ function manage(user, reload) {
             toast("Prénom changé.", "ok");
           } catch (e) { toast(e.message, "error"); }
         });
+      });
+
+      const tier = h("select", {},
+        h("option", { value: "base", text: "Base : sans IA" }),
+        h("option", { value: "plus", text: "Plus : 30 imports IA par mois" }));
+      tier.value = user.tier || "base";
+      const extra = h("input", { type: "number", min: 0, max: 10000, step: 1, value: String(user.ai_extra || 0) });
+      const usageLine = h("p", { class: "hint" });
+      const showUsage = (u) => {
+        usageLine.textContent = u.ai_allowance
+          ? `Ce mois-ci : ${u.ai_used} import${u.ai_used > 1 ? "s" : ""} IA utilisé${u.ai_used > 1 ? "s" : ""} sur ${u.ai_allowance} (reste ${u.ai_left}).`
+          : `Pas d'IA ce mois-ci (${u.ai_used} utilisé${u.ai_used > 1 ? "s" : ""}). Les imports restent possibles en lecture simple.`;
+      };
+      showUsage(user);
+      const saveTier = h("button", { class: "btn btn-secondary", type: "submit", text: "Enregistrer" });
+      const tierForm = h("form", { class: "row wrap align-end" },
+        h("div", { class: "grow" }, field("Formule", tier)),
+        h("div", { class: "grow" }, field("Imports IA en plus, chaque mois", extra)), saveTier);
+      tierForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        busy(saveTier, async () => {
+          try {
+            const r = await adminApi.changeUser(user.username, { tier: tier.value, ai_extra: Math.max(0, parseInt(extra.value, 10) || 0) });
+            changed = true;
+            showUsage(r);
+            toast("Formule enregistrée.", "ok");
+          } catch (e) { toast(e.message, "error"); }
+        });
+      });
+      const resetAi = action("Remettre le compteur IA du mois à zéro", async () => {
+        const r = await adminApi.changeUser(user.username, { reset_ai_month: true });
+        changed = true;
+        showUsage(r);
+        toast("Compteur remis à zéro.", "ok");
       });
 
       const resetBtn = action("Nouveau mot de passe provisoire", async () => {
@@ -144,6 +180,7 @@ function manage(user, reload) {
       return h("div", { class: "stack" },
         h("p", { class: "muted", text: `@${user.username} · ${plural(user.recipes, "recette")} · inscrit·e le ${shortDate(user.created_at)}` }),
         nameForm,
+        h("h3", { class: "serif", text: "Formule et crédits IA" }), tierForm, usageLine, h("div", { class: "row wrap" }, resetAi),
         h("h3", { class: "serif", text: "Appareils connectés" }), devices,
         h("h3", { class: "serif", text: "Actions" }),
         user.is_me

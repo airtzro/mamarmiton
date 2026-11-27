@@ -23,7 +23,7 @@ from typing import Annotated, Any, Callable, Literal
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from mamarmiton_server import __version__, db, security, usage
+from mamarmiton_server import __version__, db, security, tiers, usage
 from mamarmiton_server.config import Settings
 
 PREFIX = "/admin/api"
@@ -47,6 +47,9 @@ class DeleteAccount(PasswordConfirm):
 class AccountChange(BaseModel):
     display_name: str | None = Field(default=None, max_length=60)
     is_admin: bool | None = None
+    tier: Literal["base", "plus"] | None = None
+    ai_extra: int | None = Field(default=None, ge=0, le=10000)  # extra AI imports per month
+    reset_ai_month: bool = False  # forget this month's AI usage
     admin_password: str = Field(default="", max_length=security.MAX_PASSWORD)
 
 
@@ -256,7 +259,11 @@ def register(app: FastAPI, settings: Settings, limiter: security.LoginLimiter,
               (SELECT i.note FROM invites i WHERE i.used_by = u.id LIMIT 1) AS invite_note
             FROM users u ORDER BY u.is_admin DESC, u.display_name COLLATE NOCASE""").fetchall()
         return [{**{k: r[k] for k in r.keys() if k != "id"}, "is_admin": bool(r["is_admin"]),
-                 "is_me": r["id"] == admin["id"]} for r in rows]
+                 "is_me": r["id"] == admin["id"], **tiers.summary(conn, r["id"])} for r in rows]
+
+    @app.get(f"{PREFIX}/tiers")
+    def tier_list(admin: Admin) -> list[dict]:
+        return [{"tier": t, "label": tiers.TIER_LABELS[t], "ai_monthly": n} for t, n in tiers.TIERS.items()]
 
     @app.patch(f"{PREFIX}/users/{{username}}")
     def change_user(username: str, body: AccountChange, request: Request, admin: Admin, conn: Conn) -> dict:
@@ -272,8 +279,15 @@ def register(app: FastAPI, settings: Settings, limiter: security.LoginLimiter,
                 if not body.is_admin and admin_count(conn) <= 1:
                     raise _error(409, "Il faut garder au moins un administrateur.")
                 conn.execute("UPDATE users SET is_admin = ? WHERE id = ?", (1 if body.is_admin else 0, target["id"]))
+        if body.tier is not None:
+            conn.execute("UPDATE users SET tier = ? WHERE id = ?", (body.tier, target["id"]))
+        if body.ai_extra is not None:
+            conn.execute("UPDATE users SET ai_extra = ? WHERE id = ?", (body.ai_extra, target["id"]))
+        if body.reset_ai_month:
+            conn.execute("DELETE FROM ai_usage WHERE user_id = ? AND month = ?", (target["id"], tiers.month()))
         row = account(conn, username)
-        return {"username": row["username"], "display_name": row["display_name"], "is_admin": bool(row["is_admin"])}
+        return {"username": row["username"], "display_name": row["display_name"], "is_admin": bool(row["is_admin"]),
+                **tiers.summary(conn, row["id"])}
 
     @app.get(f"{PREFIX}/users/{{username}}/sessions")
     def sessions(username: str, request: Request, admin: Admin, conn: Conn) -> list[dict]:

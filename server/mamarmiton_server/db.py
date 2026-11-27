@@ -215,6 +215,21 @@ def _m5_credit_and_copy_rights(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE recipe_shares ADD COLUMN can_copy INTEGER NOT NULL DEFAULT 1")
 
 
+def _m6_tiers_and_ai_credits(conn: sqlite3.Connection) -> None:
+    """Account tiers (``base`` / ``plus``), extra AI credits granted by an admin, and how many AI
+    imports each person used per month (see tiers.py). Accounts that exist already keep the AI
+    they had: they start on ``plus``. New accounts start on ``base``."""
+    conn.execute("ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'base'")
+    conn.execute("ALTER TABLE users ADD COLUMN ai_extra INTEGER NOT NULL DEFAULT 0")
+    conn.execute("UPDATE users SET tier = 'plus'")
+    conn.execute("""CREATE TABLE ai_usage (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    month   TEXT NOT NULL,
+    used    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, month)
+)""")
+
+
 # Ordered, append-only: (version, function(conn)). Never edit or reorder a released migration.
 # A migration runs inside the transaction that also bumps ``user_version``: just execute SQL,
 # never commit. See "Schema migrations" in server/README.md.
@@ -224,6 +239,7 @@ MIGRATIONS: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (3, _m3_report_categories),
     (4, _m4_hidden_recipes),
     (5, _m5_credit_and_copy_rights),
+    (6, _m6_tiers_and_ai_credits),
 ]
 
 

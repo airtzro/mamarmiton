@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field
 
 from mamarmiton.importers import documents, heuristic, llm, pdf_text, pipeline, web
 from mamarmiton.models import Recipe
-from mamarmiton_server import images, safeweb
+from mamarmiton_server import images, safeweb, tiers
 from mamarmiton_server.config import Settings
 
 log = logging.getLogger(__name__)
@@ -84,6 +84,8 @@ W_MODEL_BUSY = "L'analyse fine est occupée par une autre recette : lecture simp
 W_LONG = "Texte très long : seul le début a été analysé finement, vérifiez la fin de la recette."
 W_UNSTRUCTURED = ("Je n'ai pas reconnu les ingrédients et les étapes : tout le texte lu est dans les notes, "
                   "à recopier au bon endroit.")
+W_NO_AI_TIER = "Lecture simple : l'analyse fine (IA) n'est pas comprise dans votre formule. Vérifiez la recette."
+W_NO_AI_CREDIT = "Lecture simple : vos imports IA du mois sont épuisés. Vérifiez la recette."
 W_NO_OCR_PARTIAL = "Ce PDF semble scanné et la lecture des scans n'est pas activée : seul son texte a été repris."
 
 
@@ -492,8 +494,9 @@ class Reading:
 
 class Importer:
     def __init__(self, settings: Settings, ocr: Ocr | None = None, model: Model | None = None,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic, credits: tiers.AiCredits | None = None) -> None:
         self.settings = settings
+        self.credits = credits  # None: no per-account AI limit (tests, tools)
         self.ocr: Ocr = ocr or TesseractOcr()
         self.model: Model = model or LocalModel(settings.import_model_file)
         self.limits = DailyLimits(settings.import_daily, settings.import_daily_all)
@@ -537,7 +540,8 @@ class Importer:
             self.limits.give_back(user_id)
             raise ImportProblem(503, "Le serveur lit déjà d'autres recettes. Réessayez dans une minute.")
         try:
-            result, timings = self._run(uploads, text, deadline=started + self.settings.import_timeout_s)
+            result, timings = self._run(uploads, text, deadline=started + self.settings.import_timeout_s,
+                                         user_id=user_id)
         except ImportProblem as problem:
             if problem.refund:
                 self.limits.give_back(user_id)
@@ -602,7 +606,8 @@ class Importer:
                 "photo": photo}
 
     # -------------------------------------------------------------- reading
-    def _run(self, uploads: list[Upload], pasted: str, deadline: float) -> tuple[dict, dict]:
+    def _run(self, uploads: list[Upload], pasted: str, deadline: float,
+             user_id: int | None = None) -> tuple[dict, dict]:
         t0 = self.clock()
         reading = Reading()
         for upload in uploads:
@@ -615,7 +620,7 @@ class Importer:
         if meaningful(source) < MIN_RECIPE_CHARS:
             raise ImportProblem(422, ONLY_DISH if reading.dish_photo is not None and not source.strip() else NO_RECIPE)
 
-        recipe, method, warnings = self._structure(source, deadline)
+        recipe, method, warnings = self._structure(source, deadline, user_id)
         t2 = self.clock()
         warnings = reading.warnings + [w for w in warnings if w not in reading.warnings]
         if reading.ocr_pages:
@@ -718,13 +723,25 @@ class Importer:
         self._add(reading, upload, text)
 
     # -------------------------------------------------------------- structuring
-    def _structure(self, source: str, deadline: float) -> tuple[Recipe, str, list[str]]:
+    def _no_credit(self, user_id: int | None) -> str | None:
+        """Why this person may not use the model now (a warning), or None and one credit is taken."""
+        if self.credits is None or user_id is None:
+            return None
+        if self.credits.take(user_id):
+            return None
+        return W_NO_AI_CREDIT if self.credits.allowance(user_id) else W_NO_AI_TIER
+
+    def _structure(self, source: str, deadline: float,
+                   user_id: int | None = None) -> tuple[Recipe, str, list[str]]:
         warnings: list[str] = []
         rules = heuristic.parse_recipe_text(source)
         recipe, method = rules, "regles"
         if self.model.available() and not pipeline.rules_are_clear(rules):
             remaining = deadline - self.clock()
-            if remaining < MODEL_MIN_TIME_S:
+            refused = None if remaining < MODEL_MIN_TIME_S else self._no_credit(user_id)
+            if refused:
+                warnings.append(refused)
+            elif remaining < MODEL_MIN_TIME_S:
                 warnings.append(W_MODEL_FAILED)
             else:
                 try:
@@ -744,6 +761,8 @@ class Importer:
                 except Exception:
                     log.exception("import model failed")
                     warnings.append(W_MODEL_FAILED)
+                if method != "ia" and self.credits is not None and user_id is not None:
+                    self.credits.give_back(user_id)  # the model gave nothing: the credit is not used
         if not recipe.ingredients and not recipe.etapes:
             recipe.notes = f"{recipe.notes}\n\n{source}".strip()
             warnings.append(W_UNSTRUCTURED)
@@ -774,11 +793,15 @@ class UrlBody(BaseModel):
 
 # ------------------------------------------------------------------ routes
 def register(app: FastAPI, settings: Settings, Session) -> None:
-    app.state.importer = Importer(settings)
+    app.state.importer = Importer(settings, credits=tiers.AiCredits(settings.db_path))
 
     @app.get("/import/status")
     def import_status(user: Session) -> dict:
-        return app.state.importer.status()
+        status = app.state.importer.status()
+        credits = app.state.importer.credits
+        if credits is not None:
+            status.update(credits.summary(user["id"]))
+        return status
 
     @app.post("/import/recipe")
     def import_recipe(user: Session,

@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 
 from mamarmiton.models import Recipe
 from mamarmiton.redact import redact
-from mamarmiton_server import __version__, admin, db, images, importer, portable, security, usage
+from mamarmiton_server import __version__, admin, db, images, importer, portable, security, tiers, usage
 from mamarmiton_server.config import Settings
 
 log = logging.getLogger(__name__)
@@ -607,8 +607,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(status_code=204)
 
     @app.get("/me")
-    def me(user: Session) -> dict:
-        return {"username": user["username"], "display_name": user["display_name"], "is_admin": bool(user["is_admin"])}
+    def me(user: Session, conn: Conn) -> dict:
+        return {"username": user["username"], "display_name": user["display_name"], "is_admin": bool(user["is_admin"]),
+                **tiers.summary(conn, user["id"])}
 
     @app.post("/me/password", status_code=204)
     def change_password(body: PasswordChange, request: Request, user: Session, conn: Conn) -> Response:

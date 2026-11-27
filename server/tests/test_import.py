@@ -80,6 +80,7 @@ def app(settings):
     app = create_app(settings)
     app.state.importer.ocr = FakeOcr(ok=False)
     app.state.importer.model = FakeModel(ok=False)
+    app.state.importer.credits = None  # tiers have their own tests (test_tiers.py)
     return app
 
 
