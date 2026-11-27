@@ -9,6 +9,9 @@ services:
     build:
       context: ..
       dockerfile: server/Dockerfile
+      args:
+        # 0 = leave out the local model's library (the import then uses the rule-based reader only)
+        WITH_LLM: ${IMPORT_WITH_LLM:-1}
     restart: unless-stopped
     # the owner of DATA_DIR on the NAS (OMV: your user's uid, group "users" = 100)
     user: "${PUID:-1000}:${PGID:-100}"
@@ -18,6 +21,13 @@ services:
       MAMARMITON_SERVER_DATA: /data
       # refuse desktop apps older than this (answer 426 "mettez à jour"); empty = accept all
       MAMARMITON_MIN_DESKTOP_VERSION: ${MIN_DESKTOP_VERSION:-}
+      # import automatique (files -> recipe), all on this server: see README "Import automatique"
+      # empty = DATA_DIR/models/qwen2.5-1.5b-instruct-q4_0.gguf (optional; without it, rule-based reading)
+      MAMARMITON_IMPORT_MODEL_PATH: ${IMPORT_MODEL_PATH:-}
+      MAMARMITON_IMPORT_MAX_MB: ${IMPORT_MAX_MB:-30}
+      MAMARMITON_IMPORT_DAILY: ${IMPORT_DAILY:-40}
+      MAMARMITON_IMPORT_DAILY_ALL: ${IMPORT_DAILY_ALL:-300}
+      MAMARMITON_IMPORT_TIMEOUT_S: ${IMPORT_TIMEOUT_S:-240}
     # no "ports:": only Caddy can reach the API (it trusts Caddy's X-Forwarded-For)
     networks: [internal]
     read_only: true

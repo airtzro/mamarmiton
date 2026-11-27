@@ -6,6 +6,7 @@ import hashlib
 import logging
 import shutil
 from pathlib import Path
+from typing import BinaryIO
 
 import pdfplumber
 
@@ -25,10 +26,11 @@ def ocr_available() -> bool:
     return shutil.which("tesseract") is not None
 
 
-def _extract_text_pdf(path: Path) -> str:
+def extract_text_layer(source: Path | BinaryIO, max_pages: int | None = None) -> str:
+    """The text layer of a PDF (a path or an open binary file); empty for a scan."""
     parts = []
-    with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
+    with pdfplumber.open(source) as pdf:
+        for page in pdf.pages[:max_pages]:
             text = page.extract_text()
             if text:
                 parts.append(text)
@@ -44,7 +46,7 @@ def _extract_text_ocr(path: Path) -> str:
 
 
 def extract_text(path: Path) -> str:
-    text = _extract_text_pdf(path)
+    text = extract_text_layer(path)
     if len(text) < MIN_TEXT_CHARS and ocr_available():
         try:
             ocr = _extract_text_ocr(path)

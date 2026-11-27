@@ -8,4 +8,11 @@
 !mamarmiton/models.py
 !mamarmiton/quantities.py
 !mamarmiton/redact.py
+!mamarmiton/config.py
+!mamarmiton/importers/__init__.py
+!mamarmiton/importers/documents.py
+!mamarmiton/importers/heuristic.py
+!mamarmiton/importers/pdf_text.py
+!mamarmiton/importers/llm.py
+!mamarmiton/importers/pipeline.py
 **/__pycache__

@@ -91,6 +91,64 @@ With the router forwarding public port 51820 to the NAS (as in the current setup
 
 The web page is part of the `api` image, so the update command below also updates it.
 
+## Import automatique (photo, PDF, Word → recipe)
+
+The apps can send one or more files (a PDF, photos of a cookbook page or a handwritten card,
+screenshots, a Word `.docx` or LibreOffice `.odt` document, a `.txt`) or pasted text to the
+server, which answers with a prefilled recipe to check before saving. **Everything runs on the
+NAS**: no account, no API key, nothing is sent to any outside service, and nothing is kept
+(files stay in memory, or in the container's `/tmp`, which is in RAM; the log holds only sizes
+and timings, never recipe text).
+
+How a file is read:
+
+| File | How |
+|---|---|
+| `.txt`, `.docx`, `.odt`, pasted text | read directly |
+| PDF with text in it | its text layer (pdfplumber) |
+| scanned PDF (little or no text) | each page rendered (pypdfium2), then OCR |
+| photo (JPEG, PNG, WebP, GIF, HEIC) | turned upright (EXIF, then Tesseract's orientation check), greyscale, resized, contrast stretched, then OCR |
+
+OCR is Tesseract with French + English, installed in the image (`tesseract-ocr`,
+`tesseract-ocr-fra`). The text is then structured by the desktop app's rule-based reader, and,
+if the model file is there, by the desktop app's small local model (Qwen 2.5 1.5B), whose
+times, servings and quantities are cross-checked against the text exactly as in the desktop
+app. A photo on which OCR finds almost no text is taken as the photo of the dish
+(`dish_photo` in the answer), and the app attaches it to the recipe.
+
+**Optional: the local model.** Without it the import works (rules only, answer `"method":
+"regles"`). With it the result is better (`"method": "ia"`):
+
+```sh
+mkdir -p "$DATA_DIR/models"
+# the same file the desktop app uses, e.g. copied from a PC where the app has it:
+cp qwen2.5-1.5b-instruct-q4_0.gguf "$DATA_DIR/models/"
+docker compose up -d api        # the status (GET /import/status) then says "ai": true
+```
+
+It needs about 1 GB of RAM once loaded (it stays loaded), and the image includes its library
+(`llama-cpp-python`, prebuilt CPU wheel). Build with `IMPORT_WITH_LLM=0` in `.env` to leave
+the library out. The first time it is used, the server runs it once in a separate process: a
+CPU the prebuilt library does not support would crash, so in that case the model is switched
+off (logged as an error) and the rules are used. A path other than `DATA_DIR/models/` can be
+set with `IMPORT_MODEL_PATH` (a path inside the container).
+
+**Limits** (all in `.env`, see `.env.example`): 8 files and 30 MB per import (`IMPORT_MAX_MB`;
+the Caddyfile lets 32 MB through for `/import/recipe`), 100 000 characters of pasted text, 40
+imports per account per day (`IMPORT_DAILY`), 300 for the whole server (`IMPORT_DAILY_ALL`),
+two imports at once (others wait up to a minute), and an import gives up after 240 s
+(`IMPORT_TIMEOUT_S`; each OCR page also stops after 90 s; a model answer that comes too late
+is dropped and the rules are used). On a modest NAS CPU, expect a few seconds per photo or
+scanned page and 10 to 60 s for the model; the log line `import user=… read=…s model=…s
+total=…s` shows the real times.
+
+API: `GET /import/status` → `{"available", "ocr", "ai", "max_files", "max_mb", "accepts"}`;
+`POST /import/recipe` (multipart: `files` repeated, and/or `text`) → `{"recipe", "dish_photo",
+"method", "warnings"}`. Errors are a French sentence in `detail`: 400 nothing sent / too many
+files / text too long, 413 too large, 415 type not accepted (the content is checked, not only
+the name), 422 no recipe found, 429 daily limit, 503 photo or scan sent while OCR is missing,
+or server busy.
+
 ## Day-to-day
 
 | Task | Command (in `server/`) |
@@ -144,6 +202,7 @@ header are allowed. `GET /version` returns `{"server", "min_desktop"}`.
 cd server
 uv venv .venv && uv pip install --python .venv -e ".[dev]" && uv pip install --python .venv --no-deps -e ..
 .venv/bin/python -m pytest          # API tests (test_api.py) and web page tests (test_web.py)
+# the import tests fake Tesseract and the model; two real OCR tests run when `tesseract` is installed
 MAMARMITON_SERVER_DATA=./data .venv/bin/python -m mamarmiton_server serve --port 8000
 ```
 
