@@ -190,6 +190,11 @@ def _draw_icon(name: str, color: str) -> Image.Image:
     elif name == "forward":
         _stroke(d, pts((5, 12), (19, 12)), w, c)
         _stroke(d, pts((13, 6), (19, 12), (13, 18)), w, c)
+    elif name == "cart":
+        _stroke(d, pts((3, 5), (6, 5), (8, 16), (18, 16), (20.5, 8), (6.5, 8)), w, c)
+        for x in (9.5, 16.5):
+            r = 1.7 * s
+            d.ellipse((x * s - r, 19.8 * s - r, x * s + r, 19.8 * s + r), fill=c)
     elif name == "close":
         _stroke(d, pts((6, 6), (18, 18)), w, c)
         _stroke(d, pts((18, 6), (6, 18)), w, c)
@@ -293,6 +298,13 @@ def _draw_tag(img: Image.Image, text: str, dish: str, scale: int) -> Image.Image
 
 
 _cache: dict[tuple, ctk.CTkImage | None] = {}
+
+
+def reset_tk_caches() -> None:
+    """Forget CTkImages: they hold Tk photo images that die with the Tk root that made them."""
+    _cache.clear()
+    icon.cache_clear()
+    logo.cache_clear()
 
 
 def cover(photo: Path | None, seed_text: str, dish: str, title: str, size: tuple[int, int],

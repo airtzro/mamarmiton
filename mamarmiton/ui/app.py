@@ -15,6 +15,7 @@ from mamarmiton import APP_NAME, __version__, config
 from mamarmiton.importers import ImportResult
 from mamarmiton.models import DISH_TYPES, Recipe
 from mamarmiton.search import Filters, search
+from mamarmiton.shopping import ShoppingState, build_list
 from mamarmiton.settings import APPEARANCES, TEXT_SIZES, Settings
 from mamarmiton.remote import AuthError, OfflineError, RemoteStore, clear_account, open_store
 from mamarmiton.storage import RecipeStore
@@ -27,11 +28,13 @@ from mamarmiton.ui.detail import DetailView
 from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, UrlImportDialog, ask_image, ask_pdf
 from mamarmiton.ui.editor import EditorView
 from mamarmiton.ui.home import HomeView
+from mamarmiton.ui.shopping import ShoppingView
 from mamarmiton.ui.widgets import IconLine, NavItem, Toast, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
 
 log = logging.getLogger(__name__)
 
 FAVORITES = "__favoris__"
+SHOPPING = "__courses__"
 PLURALS = {"Entrée": "Entrées", "Plat": "Plats", "Dessert": "Desserts", "Pain": "Pains"}
 
 
@@ -62,6 +65,8 @@ class Sidebar(ctk.CTkFrame):
         self.items: dict[str | None, NavItem] = {}
         self._nav(None, "Toutes les recettes", icon="grid")
         self._nav(FAVORITES, "Favoris", icon="star")
+        self._nav(SHOPPING, "Liste de courses", icon="cart")
+        self.shopping_active = False
 
         ctk.CTkLabel(self, text="CATÉGORIES", font=theme.font(11, "bold"), text_color=theme.SIDEBAR_MUTED,
                      anchor="w").pack(fill="x", padx=26, pady=(22, 4))
@@ -149,19 +154,34 @@ class Sidebar(ctk.CTkFrame):
     def select(self, key: str | None) -> None:
         if not self.app.can_leave_editor():
             return
+        if key == SHOPPING:
+            return self.app.show_shopping()
         self.category = key
         self._highlight()
         self.app.go_home()
 
     def _highlight(self) -> None:
         for key, item in self.items.items():
-            item.set_active(key == self.category)
+            if key == SHOPPING:
+                item.set_active(self.shopping_active)
+            else:
+                item.set_active(key == self.category and not self.shopping_active)
+
+    def set_shopping_active(self, active: bool) -> None:
+        if active != self.shopping_active:
+            self.shopping_active = active
+            self._highlight()
+
+    def update_shopping_count(self) -> None:
+        n = self.app.shopping_remaining()
+        self.items[SHOPPING].set_count(n or None)
 
     def update_counts(self, recipes: list[Recipe]) -> None:
         self.items[None].set_count(len(recipes))
         self.items[FAVORITES].set_count(sum(r.favori for r in recipes))
         for dish in DISH_TYPES:
             self.items[dish].set_count(sum(r.type_plat == dish for r in recipes))
+        self.update_shopping_count()
 
     def title(self) -> str:
         if self.category is None:
@@ -174,6 +194,9 @@ class Sidebar(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         self.settings = Settings.load()
+        art.reset_tk_caches()  # a previous App (tests, restart) left images bound to its dead Tk root
+        theme.font.cache_clear()
+        theme.serif.cache_clear()
         theme.register_fonts()
         ctk.set_appearance_mode(APPEARANCES[self.settings.appearance])
         ctk.set_widget_scaling(TEXT_SIZES[self.settings.text_size])
@@ -187,6 +210,7 @@ class App(ctk.CTk):
         set_window_icon(self)
 
         self.store, self.account = open_store()
+        self.shopping = ShoppingState.load()
         self.people: dict[str, str] = {}  # username -> display name
         self.account_dialog: AccountDialog | None = None
         self._local: RecipeStore | None = None if self.account else self.store
@@ -202,6 +226,7 @@ class App(ctk.CTk):
         self.sidebar.grid(row=0, column=0, sticky="ns")
         self.home = HomeView(self, self)
         self.detail = DetailView(self, self)
+        self.shopping_view = ShoppingView(self, self)
         self.editor = EditorView(self, self)
         self.current: ctk.CTkFrame | None = None
         self.timers = TimerBar(self)  # lives here so running timers survive changing screens
@@ -222,6 +247,7 @@ class App(ctk.CTk):
 
     # ------------------------------------------------------------ navigation
     def _switch(self, view: ctk.CTkFrame) -> None:
+        self.sidebar.set_shopping_active(view is self.shopping_view)
         if self.current is not view:
             if self.current is not None:
                 self.current.grid_forget()
@@ -274,6 +300,38 @@ class App(ctk.CTk):
         self.home.show(results, total=len(recipes), filtered=not f.is_empty(),
                        title=self.sidebar.title(), category=self.sidebar.category)
         self._switch(self.home)
+
+    # --------------------------------------------------------- shopping list
+    def shopping_selection(self) -> list[tuple[Recipe, int]]:
+        """``(recipe, servings)`` for the recipes of the list that still exist."""
+        found = []
+        for entry in self.shopping.recipes:
+            recipe = self.store.get(entry["id"])
+            if recipe is not None:
+                found.append((recipe, entry["servings"]))
+        return found
+
+    def shopping_remaining(self) -> int:
+        """Lines still to buy (the sidebar badge)."""
+        items = build_list(self.shopping_selection())
+        return (sum(i.key not in self.shopping.checked for i in items)
+                + sum(not e["done"] for e in self.shopping.extras))
+
+    def save_shopping(self) -> None:
+        self.shopping.save()
+        self.sidebar.update_shopping_count()
+
+    def add_to_shopping(self, recipe: Recipe | None, servings: int) -> None:
+        if recipe is None:
+            return
+        self.shopping.add_recipe(recipe.id, servings)
+        self.save_shopping()
+
+    def show_shopping(self) -> None:
+        if not self.can_leave_editor():
+            return
+        self.shopping_view.show()
+        self._switch(self.shopping_view)
 
     def reset_filters(self) -> None:
         self.home.clear_filters(silent=True)
@@ -415,6 +473,9 @@ class App(ctk.CTk):
         def expire() -> None:
             self._toast = None
             store.purge(trashed)
+            if store.get(trashed.recipe.id) is None and self.shopping.servings_of(trashed.recipe.id) is not None:
+                self.shopping.remove_recipe(trashed.recipe.id)
+                self.save_shopping()
 
         self._toast = Toast(self, "Recette supprimée", "Annuler", undo, expire, seconds=10)
 

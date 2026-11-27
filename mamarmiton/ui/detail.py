@@ -281,12 +281,40 @@ class DetailView(ctk.CTkFrame):
         ctk.CTkButton(stepper, image=art.icon("plus", theme.TEXT, 16), command=lambda: self._change_servings(+1),
                       **btn).pack(side="right", padx=6, pady=6)
 
+        self.btn_shop = theme.secondary_button(box, text="", compound="left", height=48,
+                                               image=art.icon("cart", theme.TEXT, 18),
+                                               command=self._shopping_clicked)
+        self.btn_shop.pack(fill="x", padx=18, pady=(8, 4))
+        self._wrapped.append((self.btn_shop, "button"))
+
         self.lbl_reset = theme.link_button(box, text="Revenir à la recette d'origine",
                                            image=art.icon("reset", theme.ACCENT_TEXT, 14), compound="left",
                                            command=lambda: self._change_servings(r.pour - self.servings))
         self.ingredient_list = ctk.CTkFrame(box, fg_color="transparent")
         self.ingredient_list.pack(fill="both", expand=True, padx=12, pady=(8, 18))
         self._render_ingredients()
+
+    def _shopping_clicked(self) -> None:
+        if self.recipe is None:
+            return
+        listed = self.app.shopping.servings_of(self.recipe.id)
+        if listed == self.servings:
+            self.app.show_shopping()
+        else:
+            self.app.add_to_shopping(self.recipe, self.servings)
+            self._update_shopping_button()
+
+    def _update_shopping_button(self) -> None:
+        if self.recipe is None or not hasattr(self, "btn_shop"):
+            return
+        listed = self.app.shopping.servings_of(self.recipe.id)
+        if listed is None:
+            text = "Ajouter à la liste de courses"
+        elif listed == self.servings:
+            text = "Dans la liste de courses · Voir"
+        else:
+            text = f"Mettre à jour la liste ({self.servings} pers.)"
+        self.btn_shop.configure(text=text)
 
     def _change_servings(self, delta: int) -> None:
         self.servings = max(1, min(99, self.servings + delta))
@@ -297,6 +325,7 @@ class DetailView(ctk.CTkFrame):
         if r is None:
             return
         self.lbl_servings.configure(text=f"  {self.servings} personne{'s' if self.servings > 1 else ''}")
+        self._update_shopping_button()
         if self.servings != r.pour:
             self.lbl_reset.configure(text=f"Revenir à {r.pour} personne{'s' if r.pour > 1 else ''}")
             self.lbl_reset.pack(after=self.lbl_servings.master, anchor="w", padx=16, pady=(4, 0))
@@ -401,6 +430,8 @@ class DetailView(ctk.CTkFrame):
                     widget.configure(wraplength=max(160, right - 70))
                 elif kind == "ingredient":
                     widget.configure(wraplength=max(120, left - 150))
+                elif kind == "button":  # CTkButton cannot wrap by itself: wrap its inner label
+                    widget._text_label.configure(wraplength=max(120, left - 90))
                 elif kind == "full":
                     widget.configure(wraplength=max(200, width - 60))
             except Exception:  # widget destroyed while re-rendering
