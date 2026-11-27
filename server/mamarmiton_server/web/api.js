@@ -122,6 +122,8 @@ export const api = {
     if (text && text.trim()) form.append("text", text);
     return json(request("POST", "/import/recipe", { form, signal }));
   },
+  /** Read a recipe from the address of a web page (the server fetches it, a few seconds). */
+  importUrl: (url, signal) => json(request("POST", "/import/url", { json: { url }, signal })),
 
   shares: () => json(request("GET", "/shares")),
   shareBook: (name, can_edit, can_copy) => request("PUT", `/shares/book/${user(name)}`, { json: { can_edit, can_copy } }),

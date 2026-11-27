@@ -16,6 +16,7 @@ so tests can replace them with fakes.
 """
 
 # no "from __future__ import annotations": FastAPI must see the real Session type of the routes
+import base64
 import concurrent.futures
 import importlib.util
 import io
@@ -31,13 +32,15 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path, PurePath
 from typing import Annotated, Callable, Iterator, Protocol
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pydantic import BaseModel, Field
 
-from mamarmiton.importers import documents, heuristic, llm, pdf_text, pipeline
+from mamarmiton.importers import documents, heuristic, llm, pdf_text, pipeline, web
 from mamarmiton.models import Recipe
-from mamarmiton_server import images
+from mamarmiton_server import images, safeweb
 from mamarmiton_server.config import Settings
 
 log = logging.getLogger(__name__)
@@ -59,6 +62,9 @@ PDF_RENDER_DPI = 300
 QUEUE_WAIT_S = 60  # how long an import waits for a free slot before "server busy"
 MODEL_WAIT_S = 30  # how long it waits for the local model when another import uses it
 MODEL_MIN_TIME_S = 10  # do not start the model with less time left than this
+
+URL_TIMEOUT_S = 45  # the page and its photo together
+MAX_URL_PHOTO_BYTES = 4 * 1024 * 1024  # of the re-encoded photo sent back with the draft
 
 PASTED_NAME = "Texte collé"
 
@@ -500,7 +506,7 @@ class Importer:
 
     def status(self) -> dict:
         return {"available": True, "ocr": bool(self.ocr.available()), "ai": bool(self.model.available()),
-                "max_files": MAX_FILES, "max_mb": self.settings.import_max_mb, "accepts": list(ACCEPTS)}
+                "max_files": MAX_FILES, "max_mb": self.settings.import_max_mb, "accepts": list(ACCEPTS), "url": True}
 
     # -------------------------------------------------------------- entry point
     def handle(self, user_id: int, files: list[UploadFile], text: str) -> dict:
@@ -548,6 +554,52 @@ class Importer:
                  [len(u.data) for u in uploads], len(text), result["method"], timings["ocr_pages"],
                  timings["read"], timings["model"], self.clock() - started)
         return result
+
+    # -------------------------------------------------------------- a website
+    def handle_url(self, user_id: int, address: str) -> dict:
+        started = self.clock()
+        try:
+            url = web.normalize_url(address)
+            safeweb.check_url(url)
+        except web.WebImportError as exc:
+            raise ImportProblem(400, str(exc)) from None
+        self.limits.take(user_id)
+        if not self.slots.acquire(timeout=QUEUE_WAIT_S):
+            self.limits.give_back(user_id)
+            raise ImportProblem(503, "Le serveur lit déjà d'autres recettes. Réessayez dans une minute.")
+        try:
+            result = self._run_url(url, time.monotonic() + URL_TIMEOUT_S)
+        except web.WebImportError as exc:
+            if isinstance(exc, safeweb.Refused):
+                self.limits.give_back(user_id)  # nothing was contacted
+            log.info("import user=%s url refused after %.1fs: %s", user_id, self.clock() - started, exc)
+            raise ImportProblem(422, str(exc)) from None
+        except Exception as exc:
+            log.exception("import user=%s url failed after %.1fs", user_id, self.clock() - started)
+            raise ImportProblem(500, "La lecture a échoué à cause d'un problème sur le serveur.") from exc
+        finally:
+            self.slots.release()
+        log.info("import user=%s url host=%s photo=%s total=%.1fs", user_id, urlsplit(url).hostname,
+                 bool(result["photo"]), self.clock() - started)
+        return result
+
+    @staticmethod
+    def _run_url(url: str, deadline: float) -> dict:
+        recipe, photo_urls = web._parse(safeweb.fetch_page(url, deadline), url)
+        warnings: list[str] = []
+        photo = None
+        for photo_url in photo_urls[:3]:
+            try:
+                data, _, content_type = images.process(safeweb.fetch_image(photo_url, deadline))
+            except (web.WebImportError, images.BadImage):
+                continue
+            if len(data) <= MAX_URL_PHOTO_BYTES:
+                photo = {"content_type": content_type, "data": base64.b64encode(data).decode("ascii")}
+                break
+        if photo_urls and not photo:
+            warnings.append("La photo de la recette n'a pas pu être récupérée.")
+        return {"recipe": finish(recipe), "dish_photo": None, "method": "site", "warnings": warnings,
+                "photo": photo}
 
     # -------------------------------------------------------------- reading
     def _run(self, uploads: list[Upload], pasted: str, deadline: float) -> tuple[dict, dict]:
@@ -716,6 +768,10 @@ def finish(recipe: Recipe) -> dict:
     return data
 
 
+class UrlBody(BaseModel):
+    url: str = Field(max_length=2000)
+
+
 # ------------------------------------------------------------------ routes
 def register(app: FastAPI, settings: Settings, Session) -> None:
     app.state.importer = Importer(settings)
@@ -730,5 +786,12 @@ def register(app: FastAPI, settings: Settings, Session) -> None:
                       text: Annotated[str, Form()] = "") -> dict:
         try:
             return app.state.importer.handle(user["id"], files or [], text or "")
+        except ImportProblem as problem:
+            raise HTTPException(problem.status, problem.message) from None
+
+    @app.post("/import/url")
+    def import_url(user: Session, body: UrlBody) -> dict:
+        try:
+            return app.state.importer.handle_url(user["id"], body.url)
         except ImportProblem as problem:
             raise HTTPException(problem.status, problem.message) from None

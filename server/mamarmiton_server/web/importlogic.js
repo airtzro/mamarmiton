@@ -19,6 +19,7 @@ export function normalizeStatus(raw) {
   return {
     ocr: raw.ocr === true,
     ai: raw.ai === true,
+    url: raw.url === true,  // can read a recipe from a website address
     maxFiles: posInt(raw.max_files, 8),
     maxMb: posInt(raw.max_mb, 30),
     accepts: accepts.length ? accepts : DEFAULT_ACCEPTS,
@@ -91,6 +92,14 @@ export function readyProblem(files, text) {
   return "";
 }
 
+/** Why "Lire la recette" cannot start with this website address, or "" when it can (the server checks the rest). */
+export function urlProblem(text) {
+  const url = String(text || "").trim();
+  if (!url) return "Collez d'abord l'adresse de la page de la recette.";
+  if (/\s/.test(url) || !url.includes(".")) return "Ce n'est pas une adresse de site. Copiez l'adresse complète de la page (elle commence par « https:// »).";
+  return "";
+}
+
 // ------------------------------------------------------------------ draft
 const str = (v, max = 20000) => (typeof v === "string" ? v.trim().slice(0, max) : typeof v === "number" ? String(v) : "");
 const minutes = (v) => {
@@ -98,10 +107,22 @@ const minutes = (v) => {
   return Number.isFinite(n) && n > 0 ? Math.min(n, 99 * 60) : 0;
 };
 
+const PHOTO_TYPES = { "image/jpeg": "photo.jpg", "image/png": "photo.png" };
+
+/** The photo of a website recipe ({content_type, data: base64} in the answer of POST /import/url) as a File, or null. */
+export function photoFromResult(result) {
+  const p = result && result.photo;
+  if (!p || !PHOTO_TYPES[p.content_type] || typeof p.data !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(p.data)) return null;
+  try {
+    const bytes = Uint8Array.from(atob(p.data), (c) => c.charCodeAt(0));
+    return bytes.length ? new File([bytes], PHOTO_TYPES[p.content_type], { type: p.content_type }) : null;
+  } catch { return null; }
+}
+
 /**
- * The answer of POST /import/recipe -> {recipe, warnings, dishPhoto}. `recipe` has the shape the editor
+ * The answer of POST /import/recipe (or /import/url) -> {recipe, warnings, dishPhoto}. `recipe` has the shape the editor
  * fills its fields from (like state.recipeOf: ingredients as {nom, quantite}); `dishPhoto` is the File
- * the server picked as the photo of the dish, or null.
+ * the server picked as the photo of the dish (or the photo of the website), or null.
  */
 export function draftFromImport(result, sentFiles = []) {
   const r = (result && typeof result.recipe === "object" && result.recipe) || {};
@@ -130,7 +151,7 @@ export function draftFromImport(result, sentFiles = []) {
       images: [],
     },
     warnings: (Array.isArray(result && result.warnings) ? result.warnings : []).map((w) => str(w, 300)).filter(Boolean).slice(0, 10),
-    dishPhoto: photo && index >= 0 && kindOf(photo) === "image" ? photo : null,
+    dishPhoto: photo && index >= 0 && kindOf(photo) === "image" ? photo : photoFromResult(result),
   };
 }
 

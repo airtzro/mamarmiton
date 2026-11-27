@@ -1,11 +1,14 @@
-// "Importer une recette": a photo of a cookbook page, a file (PDF, Word…) or a pasted text is read by the
+// "Importer une recette": a photo of a cookbook page, a file (PDF, Word…), a pasted text or the address of a
+// recipe website is read by the
 // server (OCR + local model on the NAS, no cloud) and opens in the editor as a new recipe to check.
 import { api } from "./api.js";
+import { hit } from "./usage.js";
 import { h, icon, clear } from "./dom.js";
 import { openDialog } from "./ui.js";
-import { NO_OCR_MESSAGE, acceptAttribute, addFiles, draftFromImport, formatSize, kindOf, normalizeStatus } from "./importlogic.js";
+import { NO_OCR_MESSAGE, acceptAttribute, addFiles, draftFromImport, formatSize, kindOf, normalizeStatus, urlProblem } from "./importlogic.js";
 
 const GIVE_UP_MS = 200_000;  // the NAS can take two minutes: never cut it short before that
+const GIVE_UP_URL_MS = 70_000;  // a website answers in seconds (the server stops at 45 s)
 
 let status = null;   // normalized GET /import/status, null = this server cannot import
 let known = false;   // false: not asked yet, or the last try had no connection
@@ -76,6 +79,14 @@ export function openImportDialog({ onDone }) {
         h("label", { for: "import-text", text: "Le texte de la recette" }), text);
       const showText = () => { textBox.hidden = false; draw(); text.focus(); };
 
+      const address = h("input", { id: "import-url", type: "url", inputmode: "url", autocapitalize: "none", autocomplete: "off",
+        spellcheck: "false", placeholder: "https://www.marmiton.org/recettes/…" });
+      address.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); read(); } });
+      const urlBox = h("div", { class: "field", hidden: true },
+        h("label", { for: "import-url", text: "Adresse d'une page de recette (Marmiton, 750g, Cuisine AZ…)" }), address,
+        h("p", { class: "hint", text: "Ouvrez la recette sur le site, copiez l'adresse en haut de l'écran, puis collez-la ici." }));
+      const showUrl = () => { urlBox.hidden = false; draw(); address.focus(); };
+
       const choice = (iconName, title, hint, onClick, disabled = false) =>
         h("button", { class: "import-choice", type: "button", onClick, disabled },
           h("span", { class: "import-choice-icon" }, icon(iconName, 28)),
@@ -83,7 +94,8 @@ export function openImportDialog({ onDone }) {
       const choices = h("div", { class: "import-choices" },
         choice("camera", "Prendre une photo", "D'un livre ou d'une fiche", () => camera.click(), !st.ocr),
         choice("file", "Choisir un fichier", st.ocr ? "Photo, PDF, Word, LibreOffice" : "Texte, Word ou LibreOffice", () => picker.click()),
-        choice("paste", "Coller un texte", "Copié d'un e-mail ou d'un site", showText));
+        choice("paste", "Coller un texte", "Copié d'un e-mail ou d'un site", showText),
+        st.url ? choice("link", "Adresse d'un site", "Marmiton, 750g, Cuisine AZ…", showUrl) : null);
 
       const list = h("ul", { class: "import-files", "aria-label": "Fichiers choisis" });
       const morePage = h("button", { class: "btn btn-secondary", type: "button", onClick: () => camera.click() }, icon("camera", 20), h("span"));
@@ -96,19 +108,20 @@ export function openImportDialog({ onDone }) {
         h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: close, text: "Annuler" }), readBtn);
 
       const form = h("div", { class: "stack" },
-        h("p", { text: "Une recette prise en photo, un fichier ou un texte : Mamarmiton la recopie pour vous, puis vous la vérifiez." }),
+        h("p", { text: `Une recette prise en photo, un fichier, un texte${st.url ? " ou l'adresse d'un site" : ""} : Mamarmiton la recopie pour vous, puis vous la vérifiez.` }),
         st.ocr ? null : h("p", { class: "import-note", text: NO_OCR_MESSAGE }),
-        choices, list, more, textBox, errors,
+        choices, list, more, textBox, urlBox, errors,
         h("p", { class: "hint import-drop-hint", text: "Vous pouvez aussi glisser des fichiers dans cette fenêtre." }),
         actions);
 
       // ---- waiting
       const elapsed = h("p", { class: "muted" });
+      const waitNote = h("p", { text: "Cela peut prendre une à deux minutes." });
       const wait = h("div", { class: "import-wait", hidden: true },
         h("span", { class: "spinner", "aria-hidden": "true" }),
         h("div", { role: "status" },
           h("p", { class: "import-wait-title serif", text: "Lecture de la recette…" }),
-          h("p", { text: "Cela peut prendre une à deux minutes." })),
+          waitNote),
         elapsed,
         h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: () => stop("cancel"), text: "Annuler" }));
       let stopReason = "";
@@ -130,22 +143,28 @@ export function openImportDialog({ onDone }) {
             h("button", { class: "btn btn-icon btn-ghost", type: "button", "aria-label": `Retirer ${title}`,
               onClick: () => { files = files.filter((f) => f !== file); revoke(file); showErrors([]); draw(); } }, icon("trash", 20))));
         });
-        const hasContent = files.length > 0 || !textBox.hidden;
+        const urlMode = !urlBox.hidden;
+        const hasContent = files.length > 0 || !textBox.hidden || urlMode;
         choices.hidden = hasContent;
         list.hidden = !files.length;
-        more.hidden = !hasContent;
+        more.hidden = !hasContent || urlMode;
         moreText.hidden = !textBox.hidden;
         morePage.lastChild.textContent = files.some((f) => kindOf(f) === "image") ? "Ajouter une page" : "Prendre une photo";
         readBtn.hidden = !hasContent;
       }
 
       async function read() {
-        if (!files.length && !text.value.trim()) { showErrors(["Collez d'abord le texte de la recette, ou ajoutez une photo."]); text.focus(); return; }
+        const fromSite = !urlBox.hidden;
+        if (fromSite) {
+          const problem = urlProblem(address.value);
+          if (problem) { showErrors([problem]); address.focus(); return; }
+        } else if (!files.length && !text.value.trim()) { showErrors(["Collez d'abord le texte de la recette, ou ajoutez une photo."]); text.focus(); return; }
         showErrors([]);
         const sent = [...files];
         controller = new AbortController();
         stopReason = "";
-        const giveUp = setTimeout(() => stop("timeout"), GIVE_UP_MS);
+        const giveUp = setTimeout(() => stop("timeout"), fromSite ? GIVE_UP_URL_MS : GIVE_UP_MS);
+        waitNote.textContent = fromSite ? "Cela ne devrait prendre que quelques secondes." : "Cela peut prendre une à deux minutes.";
         const started = Date.now();
         const tick = () => {
           const s = Math.round((Date.now() - started) / 1000);
@@ -158,8 +177,10 @@ export function openImportDialog({ onDone }) {
         wait.hidden = false;
         wait.querySelector("button").focus();
         try {
-          const result = await api.importRecipe(sent, text.value, controller.signal);
+          const result = fromSite ? await api.importUrl(address.value.trim(), controller.signal)
+            : await api.importRecipe(sent, text.value, controller.signal);
           if (closed) return;
+          if (fromSite) hit("url_import");
           const draft = draftFromImport(result, sent);
           waiting = false;
           close();
@@ -167,7 +188,7 @@ export function openImportDialog({ onDone }) {
         } catch (e) {
           if (closed) return;
           if (e.name !== "AbortError") showErrors([e.message]);
-          else if (stopReason === "timeout") showErrors(["La lecture prend trop de temps. Réessayez avec moins de pages, ou un peu plus tard."]);
+          else if (stopReason === "timeout") showErrors([fromSite ? "Le site met trop de temps à répondre. Réessayez dans un moment." : "La lecture prend trop de temps. Réessayez avec moins de pages, ou un peu plus tard."]);
           waiting = false;
           wait.hidden = true;
           form.hidden = false;

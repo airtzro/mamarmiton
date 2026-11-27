@@ -179,7 +179,8 @@ def test_status_needs_login(client):
 def test_status_reports_ocr_and_model(client, app, auth):
     body = client.get("/import/status", headers=auth).json()
     assert body == {"available": True, "ocr": False, "ai": False, "max_files": 8, "max_mb": 30,
-                    "accepts": [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif", ".txt", ".docx", ".odt"]}
+                    "accepts": [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif", ".txt", ".docx", ".odt"],
+                    "url": True}
     app.state.importer.ocr = FakeOcr()
     app.state.importer.model = FakeModel()
     body = client.get("/import/status", headers=auth).json()

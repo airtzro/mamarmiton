@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_ACCEPTS, NO_OCR_MESSAGE, acceptAttribute, addFiles, draftFromImport, extensionOf, formatSize, kindOf,
-  normalizeStatus, readyProblem, setPendingDraft, takePendingDraft,
+  normalizeStatus, photoFromResult, readyProblem, setPendingDraft, takePendingDraft, urlProblem,
 } from "../../mamarmiton_server/web/importlogic.js";
 
 const MB = 1024 * 1024;
@@ -14,7 +14,7 @@ test("status: an old server (no answer, not available, junk) means no import", (
   assert.equal(normalizeStatus({ available: false, ocr: true }), null);
   assert.equal(normalizeStatus("yes"), null);
   const s = normalizeStatus({ available: true });
-  assert.deepEqual(s, { ocr: false, ai: false, maxFiles: 8, maxMb: 30, accepts: DEFAULT_ACCEPTS });
+  assert.deepEqual(s, { ocr: false, ai: false, url: false, maxFiles: 8, maxMb: 30, accepts: DEFAULT_ACCEPTS });
   assert.deepEqual(normalizeStatus({ available: true, max_files: -1, max_mb: "x", accepts: [".PDF", "nope", ".txt"] }).accepts, [".pdf", ".txt"]);
 });
 
@@ -115,4 +115,40 @@ test("the pending draft is taken once", () => {
   setPendingDraft({ recipe: { nom: "A" } });
   assert.equal(takePendingDraft().recipe.nom, "A");
   assert.equal(takePendingDraft(), null);
+});
+
+test("status: website import is announced by the server", () => {
+  assert.equal(normalizeStatus({ available: true, url: true }).url, true);
+  assert.equal(normalizeStatus({ available: true, url: "yes" }).url, false);
+  assert.equal(status({ url: true }).url, true);
+});
+
+test("urlProblem: only obvious mistakes are caught on the phone, the server checks the rest", () => {
+  assert.match(urlProblem(""), /Collez/);
+  assert.match(urlProblem("   "), /Collez/);
+  assert.match(urlProblem("tarte aux pommes"), /pas une adresse/);
+  assert.match(urlProblem("marmiton"), /pas une adresse/);
+  assert.equal(urlProblem("https://www.marmiton.org/recettes/recette_tarte_1.aspx"), "");
+  assert.equal(urlProblem("  marmiton.org/recettes/x "), "");
+});
+
+test("photoFromResult: the photo of a website recipe becomes a File", async () => {
+  const bytes = Uint8Array.from([0xff, 0xd8, 0xff, 1, 2, 3]);
+  const data = Buffer.from(bytes).toString("base64");
+  const photo = photoFromResult({ photo: { content_type: "image/jpeg", data } });
+  assert.equal(photo.type, "image/jpeg");
+  assert.equal(photo.name, "photo.jpg");
+  assert.deepEqual(new Uint8Array(await photo.arrayBuffer()), bytes);
+  assert.equal(photoFromResult({ photo: { content_type: "image/png", data } }).name, "photo.png");
+  for (const bad of [null, {}, { photo: null }, { photo: { content_type: "text/html", data } },
+    { photo: { content_type: "image/jpeg", data: "***" } }, { photo: { content_type: "image/jpeg", data: "" } },
+    { photo: { content_type: "image/jpeg" } }]) assert.equal(photoFromResult(bad), null);
+});
+
+test("draftFromImport takes the website photo as the dish photo", () => {
+  const data = Buffer.from([1, 2, 3]).toString("base64");
+  const draft = draftFromImport({ recipe: { nom: "Gratin" }, dish_photo: null, photo: { content_type: "image/jpeg", data } });
+  assert.equal(draft.recipe.nom, "Gratin");
+  assert.equal(draft.dishPhoto.type, "image/jpeg");
+  assert.equal(draftFromImport({ recipe: { nom: "Gratin" }, photo: null }).dishPhoto, null);
 });
