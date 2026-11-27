@@ -17,11 +17,11 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 
 | Feature | Why | Effort |
 |---|---|---|
-| **Print / export a recipe to PDF** | Cooks still like paper in the kitchen. Render the detail view to a one-page A4 PDF (reportlab, or Pillow → PDF). | S |
-| **Kitchen mode** | Full-screen, very large text, one step at a time with big Précédent/Suivant buttons, and the screen kept awake. | S |
+| ~~**Print / export a recipe to PDF**~~ (done: "Imprimer / PDF" button) | Cooks still like paper in the kitchen. Render the detail view to a one-page A4 PDF (reportlab, or Pillow → PDF). | S |
+| ~~**Kitchen mode**~~ (done) | Full-screen, very large text, one step at a time with big Précédent/Suivant buttons, and the screen kept awake. | S |
 | ~~**Timers in steps**~~ (done, with Kitchen mode) | Detect "25 minutes" in a step and show a ▶ button that starts a countdown with a sound. | S |
-| **Duplicate a recipe** | "Créer une variante" button: copy, then open the editor. | S |
-| **Undo delete** | A toast with "Annuler" for 10 s instead of only a confirm dialog (the store already keeps `.bak`). | S |
+| ~~**Duplicate a recipe**~~ (done) | "Créer une variante" button: copy, then open the editor. | S |
+| ~~**Undo delete**~~ (done) | A toast with "Annuler" for 10 s instead of only a confirm dialog (the store already keeps `.bak`). | S |
 | **Tags** | Free tags ("Noël", "rapide", "sans gluten") with chips in the sidebar filter. | S |
 | **Pick the cover photo** | Choose which photo shows on the card; reorder photos. | S |
 | **Drag & drop a PDF** onto the window to import it (tkinterdnd2). | Fewer clicks | S |
@@ -30,7 +30,7 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 
 | Feature | Why | Effort |
 |---|---|---|
-| **Import from a recipe website URL** | Most sites (Marmiton, 750g, Cuisine AZ…) embed `schema.org/Recipe` JSON-LD. Parsing it is reliable and needs no AI. | M |
+| ~~**Import from a recipe website URL**~~ (done, JSON-LD) | Most sites (Marmiton, 750g, Cuisine AZ…) embed `schema.org/Recipe` JSON-LD. Parsing it is reliable and needs no AI. | M |
 | **Import from a photo** (phone picture of a handwritten or book recipe) | OCR, then the same AI/rules pipeline as PDFs. | M |
 | **Shopping list** | Tick recipes plus servings, get a merged list grouped by aisle, then print it or copy it to the phone. Needs unit normalisation (g/kg, cl/l), which `quantities.py` already half does. | M |
 | **Weekly meal planner** | A Monday-to-Sunday grid where you drop recipes in; feeds the shopping list. | M |
