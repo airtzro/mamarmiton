@@ -28,7 +28,7 @@ from typing import Callable
 
 from mamarmiton import config
 from mamarmiton.models import Recipe
-from mamarmiton.remote.client import ApiClient, ApiError, AuthError, ConflictError, OfflineError
+from mamarmiton.remote.client import ApiClient, ApiError, AuthError, ConflictError, OfflineError, UpgradeRequired
 from mamarmiton.storage import RecipeStore, Trashed, _atomic_write_json, copy_as_variant
 
 log = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ class SyncResult:
     images: int = 0  # photos downloaded
     changed: bool = False  # what the UI shows has changed
     error: str = ""
+    outdated: bool = False  # the server refuses this app version (426): stop syncing, keep working offline
 
 
 def _same_content(a: Recipe, b: Recipe) -> bool:
@@ -75,7 +76,7 @@ class RemoteStore:
     """Drop-in replacement for ``RecipeStore`` backed by the server.
 
     Extra attributes: ``client``, ``username``, ``status`` ("ok" | "offline" |
-    "syncing" | "auth" | "error"), ``last_sync`` (datetime | None), ``last_error``,
+    "syncing" | "auth" | "error" | "outdated"), ``last_sync`` (datetime | None), ``last_error``,
     ``pending_count``, ``conflicts`` (list of ``Conflict``) and ``on_change``
     (called from the sync thread when visible data changed).
     """
@@ -488,6 +489,9 @@ class RemoteStore:
             self._download_missing(result)
             self.status, self.last_sync = "ok", datetime.now()
             self.last_error = self._op_error
+        except UpgradeRequired as exc:
+            self.status, self.last_error, result.ok, result.error = "outdated", exc.message, False, exc.message
+            result.outdated = True
         except OfflineError as exc:
             self.status, self.last_error, result.ok, result.error = "offline", exc.message, False, exc.message
         except AuthError as exc:

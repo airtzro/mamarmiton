@@ -6,6 +6,7 @@
     python -m mamarmiton_server reset-password <username>
     python -m mamarmiton_server users
     python -m mamarmiton_server backup /data/backups/mamarmiton.sqlite3
+    python -m mamarmiton_server migrate [--dry-run]
 
 In Docker: ``docker compose exec api python -m mamarmiton_server invite``.
 """
@@ -14,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -59,9 +59,33 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("users", help="list accounts")
     backup = sub.add_parser("backup", help="copy the database safely while the server runs")
     backup.add_argument("destination", help="file to write, e.g. /data/backups/mamarmiton-2026-11-26.sqlite3")
+    mig = sub.add_parser("migrate", help="upgrade the database schema (done automatically at startup)")
+    mig.add_argument("--dry-run", action="store_true", help="only say what would be done")
     args = parser.parse_args(argv)
 
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     settings = Settings()
+    try:
+        return _run(args, settings)
+    except (db.SchemaTooNew, db.MigrationError) as exc:
+        logging.getLogger("mamarmiton_server").error("%s", exc)
+        print(f"Erreur : {exc}", file=sys.stderr)
+        return 1
+
+
+def _run(args, settings: Settings) -> int:
+    if args.command == "migrate":
+        settings.ensure_dirs()
+        start, target = db.migrate(settings.db_path, dry_run=args.dry_run)
+        if start == target:
+            print(f"Base déjà à jour (version {target}).")
+        elif args.dry_run:
+            print(f"Migration nécessaire : version {start} vers {target} (rien n'a été modifié).")
+        else:
+            print(f"Base migrée : version {start} vers {target}. Une copie a été faite à côté de la base.")
+        return 0
     if args.command == "serve":
         import uvicorn
 
@@ -118,12 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             from pathlib import Path
 
             dest = Path(args.destination)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            target = sqlite3.connect(dest)
-            try:
-                conn.backup(target)  # consistent snapshot, even mid-write
-            finally:
-                target.close()
+            db.backup_to(conn, dest)
             print(f"Base copiée dans {dest}. Les photos sont dans {settings.images_dir}.")
         elif args.command == "users":
             for row in conn.execute("SELECT u.username, u.display_name, u.is_admin, u.created_at, "

@@ -16,6 +16,8 @@ services:
       - ${DATA_DIR:-./data}:/data
     environment:
       MAMARMITON_SERVER_DATA: /data
+      # refuse desktop apps older than this (answer 426 "mettez à jour"); empty = accept all
+      MAMARMITON_MIN_DESKTOP_VERSION: ${MIN_DESKTOP_VERSION:-}
     # no "ports:": only Caddy can reach the API (it trusts Caddy's X-Forwarded-For)
     networks: [internal]
     read_only: true

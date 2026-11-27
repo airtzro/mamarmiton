@@ -26,6 +26,10 @@ class Settings:
     login_attempts: int = field(default_factory=lambda: _int("MAMARMITON_LOGIN_ATTEMPTS", 5))
     login_window_s: int = field(default_factory=lambda: _int("MAMARMITON_LOGIN_WINDOW_S", 900))
 
+    # desktop clients older than this get 426 (empty = no minimum), e.g. "4.1.0"
+    min_desktop_version: str = field(default_factory=lambda: (
+        os.environ.get("MAMARMITON_MIN_DESKTOP_VERSION") or os.environ.get("MIN_DESKTOP_VERSION") or "").strip())
+
     @property
     def db_path(self) -> Path:
         return self.data_dir / "mamarmiton.sqlite3"

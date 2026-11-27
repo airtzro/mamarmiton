@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from mamarmiton.models import Ingredient, Recipe
-from mamarmiton.remote import ApiError, AuthError, OfflineError
+from mamarmiton.remote import ApiError, AuthError, OfflineError, UpgradeRequired
 from mamarmiton.ui import remote_logic as rl
 
 
@@ -229,3 +229,23 @@ def test_conflict_rows_flag_differences():
     assert rows["Étapes"][2] is True
     assert rl.format_date("2026-05-04T09:05:00") == "04/05/2026 à 09:05"
     assert rl.format_date("") == "date inconnue"
+
+
+def test_outdated_sync_blocks_the_runner_until_reattached():
+    tk, done = ImmediateTk(), []
+    runner = rl.SyncRunner(tk, done.append, interval_ms=60_000, debounce_ms=2000)
+    store = FakeStore()
+    store.sync = lambda: (store.__setattr__("calls", store.calls + 1), SimpleNamespace(outdated=True))[1]
+    runner.attach(store)
+    assert tk.pump() and store.calls == 1 and runner.blocked and len(done) == 1
+    runner.changed()
+    runner.sync_now()
+    tk.advance(300_000)
+    assert not tk.queue and store.calls == 1  # no more attempts
+    runner.attach(store)  # signing in again / restarting tries again
+    assert tk.pump() and store.calls == 2
+
+
+def test_upgrade_required_texts():
+    assert rl.status_line("outdated")[2] == "bad" and "Mise à jour" in rl.status_line("outdated")[1]
+    assert "trop ancienne" in rl.error_text(UpgradeRequired("Cette version est trop ancienne.", "4.1.0"))

@@ -11,6 +11,8 @@ learns about deletions and revoked shares) and the caller's favourites.
 
 
 import json
+import logging
+import re
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -24,6 +26,8 @@ from pydantic import BaseModel, Field
 from mamarmiton.models import Recipe
 from mamarmiton_server import __version__, db, images, security
 from mamarmiton_server.config import Settings
+
+log = logging.getLogger(__name__)
 
 Access = Literal["owner", "edit", "read"]
 
@@ -112,6 +116,43 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, wrapped)
+
+
+def parse_version(text: str) -> tuple[int, ...] | None:
+    """"4.1.0" or "v4.1" -> (4, 1, 0); None when it is not a plain dotted version."""
+    m = re.fullmatch(r"v?(\d{1,6})\.(\d{1,6})(?:\.(\d{1,6}))?", (text or "").strip())
+    return tuple(int(g or 0) for g in m.groups()) if m else None
+
+
+class MinVersionMiddleware:
+    """Answer 426 to a desktop client older than ``min_desktop_version``.
+
+    Clients say who they are with ``X-Mamarmiton-Client: desktop/4.0.0`` (or ``web/...``).
+    A missing, malformed or non-desktop header is always let through (curl, health checks, the web app,
+    which the server itself serves at its current version).
+    """
+
+    def __init__(self, app, settings: Settings):
+        self.app = app
+        self.minimum = settings.min_desktop_version
+        self.minimum_tuple = parse_version(self.minimum)
+        if self.minimum and self.minimum_tuple is None:
+            log.warning("MIN_DESKTOP_VERSION %r is not a version; ignored", self.minimum)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and self.minimum_tuple is not None:
+            raw = dict(scope["headers"]).get(b"x-mamarmiton-client", b"").decode("latin-1")
+            kind, _, version = raw.partition("/")
+            have = parse_version(version)
+            if kind.strip().lower() == "desktop" and have is not None and have < self.minimum_tuple:
+                body = json.dumps({"detail": "Cette version de Mamarmiton est trop ancienne. Mettez-la à jour.",
+                                   "min_version": self.minimum}).encode()
+                await send({"type": "http.response.start", "status": 426,
+                            "headers": [(b"content-type", b"application/json"),
+                                        (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
 
 
 # ------------------------------------------------------------------ schemas
@@ -230,6 +271,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.limiter = limiter
     app.add_middleware(BodyLimitMiddleware, settings=settings)
+    app.add_middleware(MinVersionMiddleware, settings=settings)
     app.add_middleware(SecurityHeadersMiddleware)
 
     # -------------------------------------------------------- dependencies
@@ -374,6 +416,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict:
         return {"ok": True, "version": __version__}
+
+    @app.get("/version")
+    def version() -> dict:
+        return {"server": __version__, "min_desktop": settings.min_desktop_version or None}
 
     # --------------------------------------------------------------- auth
     def _open_session(conn: sqlite3.Connection, user_id: int, device: str) -> str:
