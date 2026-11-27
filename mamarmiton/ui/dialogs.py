@@ -295,7 +295,11 @@ class HelpDialog(Modal):
         ai_var = ctk.BooleanVar(value=settings.use_ai)
         setting_row(3, "Lire les PDF avec l'IA", "Plus précis, mais un peu plus lent.",
                     theme.switch(card, text="", variable=ai_var, width=50, command=lambda: app.set_use_ai(ai_var.get())))
-        ctk.CTkFrame(card, fg_color="transparent", height=1, width=1).grid(row=8, column=0, pady=(0, 10))
+        upd_var = ctk.BooleanVar(value=settings.check_updates)
+        setting_row(4, "Vérifier les mises à jour", "Prévient quand une nouvelle version existe.",
+                    theme.switch(card, text="", variable=upd_var, width=50,
+                                 command=lambda: app.set_check_updates(upd_var.get())))
+        ctk.CTkFrame(card, fg_color="transparent", height=1, width=1).grid(row=10, column=0, pady=(0, 10))
 
         # --- backups
         card = theme.card(body)

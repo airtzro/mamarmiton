@@ -36,7 +36,7 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 | **Weekly meal planner** | A Monday-to-Sunday grid where you drop recipes in; feeds the shopping list. | M |
 | **Rating & "cooked on" history** | ★1–5 plus the dates it was made. Sort by "pas faite depuis longtemps". | S–M |
 | **Better AI** | Offer Qwen 2.5 3B for PCs with 8 GB+ RAM, keep the model loaded between imports, and add a "re-run the AI" button on the review screen. Possibly use a JSON-schema grammar instead of plain JSON mode. | M |
-| **Auto-update check** | Read a version file on GitHub at start-up and offer the new `.exe`. | M |
+| ~~**Auto-update check**~~ | **Done**: `mamarmiton/updates.py` asks GitHub for the latest release once a day and shows a "Télécharger / Plus tard" banner. | ~~M~~ |
 
 ## Later: platform
 
@@ -52,5 +52,5 @@ Effort: **S** is under a day, **M** is a few days, **L** is a week or more.
 ## Tech debt to keep in mind
 
 - ~~No automated GUI tests yet.~~ **Done**: `tests/test_ui_smoke.py` builds `App` and walks home, detail and editor (runs under Xvfb in CI, skipped without a display).
-- ~~No CI.~~ **Done**: `.github/workflows/tests.yml` runs the desktop and server tests on every push and pull request. Still to do: build the `.exe` on `windows-latest` for each tag.
+- ~~No CI.~~ ~~.exe build.~~ **Done**: `.github/workflows/tests.yml` runs the desktop and server tests on every push and pull request. The `.exe` is built on `windows-latest` and released for each `v*` tag (`release.yml`).
 - The rule-based parser struggles with multi-column PDF layouts. pdfplumber's `extract_words` with x-positions could rebuild the columns.

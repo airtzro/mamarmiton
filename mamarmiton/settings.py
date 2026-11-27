@@ -20,6 +20,9 @@ class Settings:
     text_size: str = "Normale"
     use_ai: bool = True
     sort: str = "Favoris d'abord"
+    check_updates: bool = True
+    last_update_check: str = ""  # ISO date of the last check
+    snoozed_version: str = ""  # version the user postponed with "Plus tard"
 
     @classmethod
     def load(cls) -> "Settings":

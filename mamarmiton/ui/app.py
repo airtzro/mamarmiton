@@ -5,13 +5,17 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import queue
 import sys
+import threading
+from datetime import date
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from mamarmiton import APP_NAME, __version__, config
+from mamarmiton import APP_NAME, __version__, config, updates
 from mamarmiton.importers import ImportResult
 from mamarmiton.models import DISH_TYPES, Recipe
 from mamarmiton.search import Filters, search
@@ -29,7 +33,7 @@ from mamarmiton.ui.dialogs import HelpDialog, ImportDialog, UrlImportDialog, ask
 from mamarmiton.ui.editor import EditorView
 from mamarmiton.ui.home import HomeView
 from mamarmiton.ui.shopping import ShoppingView
-from mamarmiton.ui.widgets import IconLine, NavItem, Toast, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
+from mamarmiton.ui.widgets import IconLine, NavItem, Toast, UpdateBanner, bind_tree, fix_scaled_sizes, pointer_inside, set_cursor_tree, set_window_icon, use_portable_corners
 
 log = logging.getLogger(__name__)
 
@@ -244,6 +248,9 @@ class App(ctk.CTk):
         self.runner.attach(self.store)
         if self.store.warnings:
             self.after(300, lambda: messagebox.showwarning("Attention", "\n\n".join(self.store.warnings), parent=self))
+        self._update_results: queue.Queue = queue.Queue()
+        self._update_banner: UpdateBanner | None = None
+        self.after(2000, self.start_update_check)
 
     # ------------------------------------------------------------ navigation
     def _switch(self, view: ctk.CTkFrame) -> None:
@@ -624,6 +631,44 @@ class App(ctk.CTk):
     def set_use_ai(self, value: bool) -> None:
         self.settings.use_ai = value
         self.settings.save()
+
+    def set_check_updates(self, value: bool) -> None:
+        self.settings.check_updates = value
+        self.settings.save()
+
+    # ---------------------------------------------------------------- updates
+    def start_update_check(self) -> None:
+        """At most once a day, in the background; silent when offline."""
+        if not (self.settings.check_updates and updates.enabled() and updates.due(self.settings.last_update_check)):
+            return
+        self.settings.last_update_check = date.today().isoformat()
+        self.settings.save()
+
+        def work() -> None:
+            self._update_results.put(updates.check_latest(__version__))
+
+        threading.Thread(target=work, daemon=True).start()
+        self.after(500, self._poll_update)
+
+    def _poll_update(self) -> None:
+        try:
+            info = self._update_results.get_nowait()
+        except queue.Empty:
+            self.after(500, self._poll_update)
+            return
+        if info is not None:
+            self.show_update(info)
+
+    def show_update(self, info: updates.UpdateInfo) -> None:
+        if info.version == self.settings.snoozed_version:
+            return
+
+        def later() -> None:
+            self.settings.snoozed_version = info.version
+            self.settings.save()
+
+        self._update_banner = UpdateBanner(self, f"Une nouvelle version ({info.version}) est disponible",
+                                           lambda: webbrowser.open(info.url), later)
 
     # ---------------------------------------------------------- account & sync
     def local_book(self) -> RecipeStore:

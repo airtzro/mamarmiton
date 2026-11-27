@@ -232,6 +232,26 @@ class Toast(ctk.CTkFrame):
         self._finish(self._on_expire)
 
 
+class UpdateBanner(ctk.CTkFrame):
+    """A discreet "new version" notice at the bottom of the window with two buttons."""
+
+    def __init__(self, master, message: str, on_download: Callable[[], None], on_later: Callable[[], None]):
+        super().__init__(master, fg_color=theme.SURFACE, border_width=1, border_color=theme.BORDER_STRONG,
+                         corner_radius=theme.RADIUS)
+        ctk.CTkLabel(self, text=message, font=theme.font(14), text_color=theme.TEXT, anchor="w",
+                     justify="left", wraplength=420).pack(side="left", padx=(18, 8), pady=12)
+        self.download_button = theme.link_button(self, text="Télécharger", command=lambda: self._run(on_download))
+        self.download_button.pack(side="left", padx=(0, 4), pady=8)
+        self.later_button = theme.link_button(self, text="Plus tard", command=lambda: self._run(on_later))
+        self.later_button.pack(side="left", padx=(0, 10), pady=8)
+        self.place(relx=0.5, rely=1.0, anchor="s", y=-24)
+        self.lift()
+
+    def _run(self, callback: Callable[[], None]) -> None:
+        self.destroy()
+        callback()
+
+
 class IconLine(ctk.CTkFrame):
     """An icon with a text that wraps beside it (a label with ``compound="left"`` wraps under the icon)."""
 

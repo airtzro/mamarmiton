@@ -97,6 +97,13 @@ pyinstaller recette.spec
 
 The result is `dist/recette.exe`, a single file with no console window. Ship the `model/` folder next to it if you want AI import.
 
+## Publishing a release
+
+1. Bump the version in `pyproject.toml` and `mamarmiton/__init__.py`, commit.
+2. `git tag v4.1.0 && git push --tags`
+
+The `release` workflow (`.github/workflows/release.yml`) tests, builds `recette.exe` on Windows and attaches it to a GitHub Release. The packaged app checks that release page once a day (setting "Vérifier les mises à jour") and offers a "Télécharger" button; it never replaces itself. From source, set `MAMARMITON_UPDATE_CHECK=1` to try it.
+
 ## Project layout
 
 ```
