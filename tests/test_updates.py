@@ -266,7 +266,8 @@ def test_linux_swap_and_restart(frozen_exe, monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     updates.install_and_restart(new)
     assert exe.read_bytes() == b"new version" and not new.exists()
-    assert os.stat(exe).st_mode & 0o777 == 0o755
+    if os.name != "nt":  # Windows has no execute bits: chmod only toggles read-only there
+        assert os.stat(exe).st_mode & 0o777 == 0o755
     (args, kwargs), = FakePopen.calls
     assert args == [str(exe)]
     assert kwargs["start_new_session"] and kwargs["close_fds"] and "creationflags" not in kwargs
