@@ -147,5 +147,7 @@ def test_csp_needs_no_change_for_the_service_worker(client):
 def test_javascript_unit_tests():
     """Pure web modules (timers, shopping, quantities port) are tested with node's built-in runner."""
     tests = Path(__file__).parent / "js"
-    result = subprocess.run(["node", "--test", str(tests)], capture_output=True, text=True, timeout=120)
+    files = sorted(str(f) for f in tests.glob("*.test.mjs"))  # node 24 does not accept a directory here
+    assert files
+    result = subprocess.run(["node", "--test", *files], capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
