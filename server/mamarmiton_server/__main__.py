@@ -5,7 +5,9 @@
     python -m mamarmiton_server invite [--note "pour ma soeur"]
     python -m mamarmiton_server reset-password <username>
     python -m mamarmiton_server users
-    python -m mamarmiton_server backup /data/backups/mamarmiton.sqlite3
+    python -m mamarmiton_server backup /data/backups          # snapshot (db + photos), see ops/README.md
+    python -m mamarmiton_server restore-check <snapshot>
+    python -m mamarmiton_server restore <snapshot> --into /data [--force]
     python -m mamarmiton_server migrate [--dry-run]
 
 In Docker: ``docker compose exec api python -m mamarmiton_server invite``.
@@ -57,8 +59,17 @@ def main(argv: list[str] | None = None) -> int:
     reset.add_argument("username")
     reset.add_argument("--password-stdin", action="store_true", help="read the password from standard input")
     sub.add_parser("users", help="list accounts")
-    backup = sub.add_parser("backup", help="copy the database safely while the server runs")
-    backup.add_argument("destination", help="file to write, e.g. /data/backups/mamarmiton-2026-11-26.sqlite3")
+    backup = sub.add_parser("backup", help="snapshot of database + photos while the server runs")
+    backup.add_argument("destination", help="folder for mamarmiton-DATE.tar.gz snapshots (or a *.sqlite3 file: "
+                                            "database copy only, old behaviour)")
+    backup.add_argument("--keep-daily", type=int, default=7, help="days to keep one snapshot of (default 7)")
+    backup.add_argument("--keep-weekly", type=int, default=8, help="weeks to keep one snapshot of (default 8)")
+    check = sub.add_parser("restore-check", help="restore drill: restore a snapshot to a temp dir and verify it")
+    check.add_argument("snapshot")
+    rest = sub.add_parser("restore", help="restore a snapshot into a data directory")
+    rest.add_argument("snapshot")
+    rest.add_argument("--into", required=True, metavar="DATA_DIR")
+    rest.add_argument("--force", action="store_true", help="replace a non-empty directory (old content is kept aside)")
     mig = sub.add_parser("migrate", help="upgrade the database schema (done automatically at startup)")
     mig.add_argument("--dry-run", action="store_true", help="only say what would be done")
     args = parser.parse_args(argv)
@@ -66,16 +77,24 @@ def main(argv: list[str] | None = None) -> int:
     import logging
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    settings = Settings()
     try:
-        return _run(args, settings)
+        return _run(args)
     except (db.SchemaTooNew, db.MigrationError) as exc:
         logging.getLogger("mamarmiton_server").error("%s", exc)
         print(f"Erreur : {exc}", file=sys.stderr)
         return 1
 
 
-def _run(args, settings: Settings) -> int:
+def _run(args) -> int:
+    from pathlib import Path
+
+    from mamarmiton_server import backup as snap
+
+    if args.command == "restore-check":
+        return snap.cmd_restore_check(Path(args.snapshot))
+    if args.command == "restore":
+        return snap.cmd_restore(Path(args.snapshot), Path(args.into), args.force)
+    settings = Settings()
     if args.command == "migrate":
         settings.ensure_dirs()
         start, target = db.migrate(settings.db_path, dry_run=args.dry_run)
@@ -86,6 +105,8 @@ def _run(args, settings: Settings) -> int:
         else:
             print(f"Base migrée : version {start} vers {target}. Une copie a été faite à côté de la base.")
         return 0
+    if args.command == "backup" and not args.destination.endswith(".sqlite3"):
+        return snap.cmd_backup(settings, Path(args.destination), args.keep_daily, args.keep_weekly)
     if args.command == "serve":
         import uvicorn
 
@@ -139,8 +160,6 @@ def _run(args, settings: Settings) -> int:
                 conn.execute("DELETE FROM sessions WHERE user_id = ?", (row["id"],))
             print("Mot de passe changé ; tous les appareils de ce compte sont déconnectés.")
         elif args.command == "backup":
-            from pathlib import Path
-
             dest = Path(args.destination)
             db.backup_to(conn, dest)
             print(f"Base copiée dans {dest}. Les photos sont dans {settings.images_dir}.")
