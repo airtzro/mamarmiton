@@ -5,7 +5,9 @@ import * as store from "./offline.js";
 import { hasOpenDialog, initTheme, isDark, setOffline, toast, toggleTheme } from "./ui.js";
 import { renderLogin } from "./login.js";
 import { renderHome } from "./home.js";
-import { leaveCookMode, renderDetail } from "./detail.js";
+import { renderDetail } from "./detail.js";
+import { leaveCookMode } from "./kitchen.js";
+import { clearShopping, renderCourses } from "./courses.js";
 import { renderEditor } from "./editor.js";
 import { openAccountDialog } from "./account.js";
 
@@ -58,7 +60,7 @@ function showLogin(message = "") {
 
 async function signOut() {
   const name = state.me && state.me.username;
-  if (name) await store.clearUser(name);  // this user's copy and unsent edits leave the device
+  if (name) { await store.clearUser(name); clearShopping(name); }  // this user's copy, unsent edits and shopping list leave the device
   forgetPhotosOnDevice();
   showLogin("");
 }
@@ -102,6 +104,7 @@ function buildShell() {
       h("img", { src: "/app/icon.svg", alt: "", width: 36, height: 36 }), h("span", { class: "serif", text: "Mamarmiton" })),
     h("div", { class: "topbar-actions" },
       h("a", { class: "btn btn-accent", href: "#/nouvelle", "aria-label": "Nouvelle recette" }, icon("plus", 20), h("span", { class: "btn-label", text: "Nouvelle recette" })),
+      h("a", { class: "btn btn-topbar", href: "#/courses", "aria-label": "Courses" }, icon("cart", 22), h("span", { class: "btn-label", text: "Courses" })),
       themeBtn,
       h("button", { class: "btn btn-topbar", type: "button", "aria-label": "Mon compte", onClick: () => openAccountDialog({ onSignOut: signOut }) },
         icon("user", 22), h("span", { class: "btn-label", text: state.me.display_name || state.me.username }))));
@@ -124,6 +127,9 @@ function route() {
     });
     view.kind = "detail";
     view.id = id;
+  } else if (kind === "courses") {
+    view = renderCourses(main);
+    view.kind = "courses";
   } else if (kind === "nouvelle") {
     view = renderEditor(main, null, { done: (rid) => { location.hash = `#/r/${rid}`; }, cancel: () => { location.hash = "#/"; } });
     view.kind = "editor";
@@ -151,6 +157,7 @@ async function refresh() {
 function afterChange(changed) {
   if (!view || !changed || !changed.size) return;
   if (view.kind === "home") view.update();
+  else if (view.kind === "courses") view.update();
   else if (view.kind === "detail" && changed.has(view.id) && !hasOpenDialog()) view.update();
 }
 window.addEventListener("mamarmiton:data", () => view && view.kind === "home" && view.update());
