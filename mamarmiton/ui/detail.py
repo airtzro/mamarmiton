@@ -134,7 +134,13 @@ class DetailView(ctk.CTkFrame):
         self.btn_edit = theme.secondary_button(bar, text="Modifier", image=art.icon("pencil", theme.TEXT, 17),
                                                compound="left", width=0, command=lambda: app.edit_recipe(self.recipe))
         self.btn_more = theme.secondary_button(bar, text="Plus", image=art.icon("more", theme.TEXT, 17),
-                                               compound="left", width=0, command=self._open_more)
+                                               compound="left", width=0, command=self._toggle_more)
+        self._more_menu: tk.Menu | None = None
+        self._more_closed_by_button = False
+        # customtkinter already binds <Button-1> on "all", which would shadow a plain <ButtonPress> for left clicks
+        for seq in ("<Button-1>", "<ButtonPress>"):
+            app.bind_all(seq, self._click_anywhere, add=True)
+        app.bind_all("<Escape>", lambda _e: self._close_more(), add=True)
         self.btn_share = theme.secondary_button(bar, text="Partager", image=art.icon("share", theme.TEXT, 17),
                                                 compound="left", width=0,
                                                 command=lambda: app.share_recipe(self.recipe))
@@ -223,13 +229,45 @@ class DetailView(ctk.CTkFrame):
                 continue
             label, command = item
             danger = label == "Supprimer"
-            menu.add_command(label=f"  {label}  ", command=command,
+            menu.add_command(label=f"  {label}  ", command=lambda c=command: (self._close_more(), c()),
                              foreground=pick(theme.DANGER) if danger else None)
         b = self.btn_more
         try:
             menu.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height() + 4)
         finally:
             menu.grab_release()
+        self._more_menu = menu
+
+    def _close_more(self) -> bool:
+        """Take the "Plus" menu down if it is showing; True when it was."""
+        menu, self._more_menu = self._more_menu, None
+        if menu is None:
+            return False
+        try:
+            menu.unpost()
+            menu.after_idle(menu.destroy)  # not right away: this may run inside one of the menu's own commands
+        except tk.TclError:
+            pass
+        return True
+
+    def _toggle_more(self) -> None:
+        # The press that reached the button already closed an open menu (see _click_anywhere), so a
+        # second click on "Plus" closes it instead of opening it again.
+        if self._more_closed_by_button:
+            self._more_closed_by_button = False
+            return
+        self._open_more()
+
+    def _click_anywhere(self, event) -> None:
+        """On Linux tk_popup returns at once and the grab is released, so Tk never unposts the menu on
+        an outside click by itself: any press outside the menu closes it here."""
+        if self._more_menu is None:
+            return
+        name = str(event.widget)
+        if name.startswith(str(self._more_menu)):
+            return  # a click on one of the menu's entries: the menu runs it and closes itself
+        self._close_more()
+        self._more_closed_by_button = name.startswith(str(self.btn_more))
 
     def _update_fav_button(self) -> None:
         fav = bool(self.recipe and self.recipe.favori)
