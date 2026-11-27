@@ -93,9 +93,13 @@ class LoginLimiter:
         self._lock = threading.Lock()
 
     def _recent(self, key: tuple[str, str], now: float) -> deque[float]:
-        q = self._fails[key]
+        q = self._fails.get(key)
+        if q is None:
+            return deque()
         while q and now - q[0] > self.window_s:
             q.popleft()
+        if not q:
+            del self._fails[key]  # do not keep one entry per username an attacker ever tried
         return q
 
     def retry_after(self, ip: str, username: str) -> int:
@@ -113,6 +117,9 @@ class LoginLimiter:
     def failed(self, ip: str, username: str) -> None:
         now = time.monotonic()
         with self._lock:
+            if len(self._fails) > 5000:
+                for key in list(self._fails):
+                    self._recent(key, now)
             self._fails[(ip, username)].append(now)
             self._fails[(ip, "")].append(now)
 

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Iterator, Literal
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,87 @@ Access = Literal["owner", "edit", "read"]
 MAX_TEXT = 4000
 MAX_NOTES = 20000
 MAX_ITEMS = 300
+MAX_NUMBER = 1_000_000  # minutes / servings
+MAX_JSON_BODY = 2 * 1024 * 1024  # a maximal recipe is well under 2 MB
+MAX_RECIPES_PER_USER = 5000
+
+
+class BodyLimitMiddleware:
+    """Refuse oversized request bodies while they stream in (Content-Length can be absent or a lie)."""
+
+    def __init__(self, app, settings: Settings):
+        self.app = app
+        self.image_limit = (settings.max_image_mb + 1) * 1024 * 1024
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        is_upload = scope["method"] == "POST" and scope["path"].endswith("/images")
+        limit = self.image_limit if is_upload else MAX_JSON_BODY
+        started = False
+
+        async def too_large():
+            body = b'{"detail":"Requ\xc3\xaate trop volumineuse."}'
+            await send({"type": "http.response.start", "status": 413,
+                        "headers": [(b"content-type", b"application/json"), (b"connection", b"close"),
+                                    (b"content-length", str(len(body)).encode())]})
+            await send({"type": "http.response.body", "body": body})
+
+        declared = dict(scope["headers"]).get(b"content-length", b"")
+        if declared.isdigit() and int(declared) > limit:
+            return await too_large()
+        received = 0
+        rejected = False
+
+        async def limited_receive():
+            nonlocal received, rejected
+            if rejected:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    # answer now and pretend the client left: FastAPI would turn an exception
+                    # raised from here into a 400 "bad body"
+                    rejected = True
+                    if not started:
+                        await too_large()
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def tracking_send(message):
+            nonlocal started
+            if rejected:
+                return
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        await self.app(scope, limited_receive, tracking_send)
+
+
+class SecurityHeadersMiddleware:
+    """nosniff everywhere; API answers (tokens, recipes) are never cached unless a route says so."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def wrapped(message):
+            if message["type"] == "http.response.start":
+                names = {k.lower() for k, _ in message["headers"]}
+                extra = []
+                if b"x-content-type-options" not in names:
+                    extra.append((b"x-content-type-options", b"nosniff"))
+                if b"cache-control" not in names:
+                    extra.append((b"cache-control", b"no-store"))
+                message = {**message, "headers": [*message["headers"], *extra]}
+            await send(message)
+
+        await self.app(scope, receive, wrapped)
 
 
 # ------------------------------------------------------------------ schemas
@@ -77,12 +158,14 @@ def clean_recipe(raw: dict, recipe_id: str) -> dict:
     """
     try:
         recipe = Recipe.from_dict(raw)
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, OverflowError) as exc:  # OverflowError: {"temps": Infinity}
         raise _error(422, f"Recette invalide : {exc}") from exc
     recipe.id = recipe_id
     data = recipe.to_dict()
     data.pop("favori", None)
     data.pop("images", None)
+    if any(abs(data[k]) > MAX_NUMBER for k in ("temps", "temps_cuisson", "pour")):
+        raise _error(422, "Valeur numérique trop grande.")
     if len(data["nom"]) > 200:
         raise _error(422, "Le nom de la recette est trop long.")
     if len(data["notes"]) > MAX_NOTES:
@@ -141,6 +224,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Mamarmiton", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
     app.state.limiter = limiter
+    app.add_middleware(BodyLimitMiddleware, settings=settings)
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # -------------------------------------------------------- dependencies
     def get_db() -> Iterator[sqlite3.Connection]:
@@ -281,6 +366,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def _open_session(conn: sqlite3.Connection, user_id: int, device: str) -> str:
         token = security.new_token()
         now = db.now()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=settings.token_idle_days)).isoformat(timespec="microseconds")
+        conn.execute("DELETE FROM sessions WHERE last_used < ?", (cutoff,))  # tokens nobody will use again
         conn.execute("INSERT INTO sessions VALUES (?, ?, ?, ?, ?)",
                      (security.sha256(token), user_id, device.strip()[:100], now, now))
         return token
@@ -347,8 +434,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"username": user["username"], "display_name": user["display_name"], "is_admin": bool(user["is_admin"])}
 
     @app.post("/me/password", status_code=204)
-    def change_password(body: PasswordChange, user: Session, conn: Conn) -> Response:
+    def change_password(body: PasswordChange, request: Request, user: Session, conn: Conn) -> Response:
+        # a stolen token must not allow guessing the current password offline-fast
+        key = (client_ip(request), "pw:" + user["username"])
+        wait = limiter.retry_after(*key)
+        if wait:
+            raise HTTPException(429, "Trop d'essais. Réessayez plus tard.", headers={"Retry-After": str(wait)})
         if not security.verify_password(user["password_hash"], body.old_password):
+            limiter.failed(*key)
             raise _error(403, "L'ancien mot de passe est incorrect.")
         problem = security.password_problem(body.new_password, user["username"])
         if problem:
@@ -380,7 +473,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # ------------------------------------------------------------- recipes
     @app.get("/recipes")
-    def list_recipes(user: Session, conn: Conn, since: int = 0) -> dict:
+    def list_recipes(user: Session, conn: Conn, since: Annotated[int, Query(ge=0, le=2**62)] = 0) -> dict:
         uid = user["id"]
         conn.execute("BEGIN")  # one consistent snapshot for everything below
         try:
@@ -417,6 +510,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if row is None or (row["deleted"] and row["owner_id"] == uid):
                 if body.base_version is not None and row is None:
                     raise _error(404, "Recette introuvable (supprimée ?).")
+                if row is None and conn.execute("SELECT COUNT(*) FROM recipes WHERE owner_id = ? AND deleted = 0",
+                                                (uid,)).fetchone()[0] >= MAX_RECIPES_PER_USER:
+                    raise _error(409, "Trop de recettes dans ce livre.")
                 version = (row["version"] + 1) if row else 1
                 conn.execute("INSERT OR REPLACE INTO recipes (id, owner_id, data, version, seq, updated_at, deleted) "
                              "VALUES (?, ?, ?, ?, ?, ?, 0)",
