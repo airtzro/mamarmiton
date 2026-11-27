@@ -192,3 +192,18 @@ def test_url_import_closed_mid_fetch_cleans_up_and_stays_quiet(app, monkeypatch,
     assert got == []
     assert not folder.exists()
     assert app.current is not app.editor
+
+
+def test_closing_the_window_asks_before_dropping_unsaved_edits(app, monkeypatch):
+    app.new_recipe()
+    _pump(app)
+    app.editor.e_nom.insert(0, "Presque finie")
+    asked = []
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(1) or False)
+    app._quit()
+    assert asked and app.winfo_exists()
+    assert app.current is app.editor
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    app._quit()
+    with pytest.raises(tkinter.TclError):
+        app.update()  # the window is gone

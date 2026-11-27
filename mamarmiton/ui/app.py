@@ -892,6 +892,8 @@ class App(ctk.CTk):
         self.after(300, self._check_conflicts)
 
     def _quit(self) -> None:
+        if not self.can_leave_editor():  # closing the window must not silently drop unsaved edits
+            return
         self.close_kitchen()
         self.finish_pending_delete()
         self.runner.stop()
