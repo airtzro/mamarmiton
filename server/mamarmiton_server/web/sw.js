@@ -4,8 +4,10 @@
 //  - recipe photos are served cache-first;
 //  - everything else (the API, with its bearer token) is never touched or stored here.
 // The server replaces the version below with its own, so a new release drops the old shell cache.
+// SHELL_REVISION is bumped by hand whenever the list below changes between two server releases.
 const VERSION = "__VERSION__";
-const SHELL_CACHE = `mamarmiton-shell-${VERSION}`;
+const SHELL_REVISION = 2;
+const SHELL_CACHE = `mamarmiton-shell-${VERSION}-${SHELL_REVISION}`;
 const PHOTO_CACHE = "mamarmiton-photos";
 const SLOW_NETWORK_MS = 4000;
 
@@ -15,6 +17,7 @@ const SHELL = [
   "/app/login.js", "/app/home.js", "/app/detail.js", "/app/editor.js", "/app/share.js", "/app/account.js",
   "/app/quantities.js", "/app/search.js", "/app/timers.js", "/app/timer-tray.js", "/app/kitchen.js",
   "/app/shopping.js", "/app/courses.js", "/app/usage.js", "/app/diagnostics.js", "/app/books.js",
+  "/app/importer.js", "/app/importlogic.js",
   "/app/style.css", "/app/manifest.webmanifest",
   "/app/icon.svg", "/app/icon-180.png", "/app/icon-192.png", "/app/icon-512.png",
   "/app/fonts/AtkinsonHyperlegible-Regular.ttf", "/app/fonts/AtkinsonHyperlegible-Bold.ttf",

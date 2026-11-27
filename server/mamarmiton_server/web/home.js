@@ -132,7 +132,7 @@ function bookSwitcher(choose) {
 }
 
 /** The recipe list. Returns {update} to redraw after a sync without losing the search text. */
-export function renderHome(main, { onNew }) {
+export function renderHome(main, { onNew, onImport, canImport }) {
   document.title = "Mamarmiton";
   const f = state.filters;
   const count = h("p", { class: "count", "aria-live": "polite" });
@@ -213,7 +213,11 @@ export function renderHome(main, { onNew }) {
       if (!all.length) {
         empty.append(h("h2", { class: "serif", text: "Votre carnet est encore vide" }),
           h("p", { class: "muted", text: "Ajoutez votre première recette : tapez-la, ou prenez-la en photo." }),
-          h("button", { class: "btn btn-primary btn-big", type: "button", onClick: onNew }, icon("plus", 20), "Nouvelle recette"));
+          h("div", { class: "row wrap center" },
+            h("button", { class: "btn btn-primary btn-big", type: "button", onClick: onNew }, icon("plus", 20), "Nouvelle recette"),
+            canImport && canImport()
+              ? h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: onImport }, icon("scan", 22), "Importer une recette")
+              : null));
       } else if (f.category === "favoris" && !f.text.trim()) {
         empty.append(h("h2", { class: "serif", text: "Pas encore de favori" }),
           h("p", { class: "muted", text: "Touchez l'étoile d'une recette pour la retrouver ici." }));

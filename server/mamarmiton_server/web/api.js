@@ -113,6 +113,15 @@ export const api = {
   deleteImage: (id, imageId) => request("DELETE", `/recipes/${id}/images/${imageId}`),
   async imageBlob(id, imageId) { return (await request("GET", `/recipes/${id}/images/${imageId}`)).blob(); },
 
+  importStatus: () => json(request("GET", "/import/status")),
+  /** Read a recipe from photos, files and/or a pasted text. Can take two minutes on the NAS: `signal` cancels. */
+  importRecipe(files, text, signal) {
+    const form = new FormData();
+    for (const file of files) form.append("files", file, file.name || "photo.jpg");
+    if (text && text.trim()) form.append("text", text);
+    return json(request("POST", "/import/recipe", { form, signal }));
+  },
+
   shares: () => json(request("GET", "/shares")),
   shareBook: (name, can_edit) => request("PUT", `/shares/book/${user(name)}`, { json: { can_edit } }),
   unshareBook: (name) => request("DELETE", `/shares/book/${user(name)}`),

@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), "../../mamarmiton_server/web");
 const files = readdirSync(WEB).filter((f) => f.endsWith(".js") && f !== "sw.js");
 
-const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+// a block comment starts after a blank (so "image/*" in a string is not one)
+const strip = (src) => src.replace(/(^|\s)\/\*[\s\S]*?\*\//g, "$1").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 
 function exportsOf(src) {
   const names = new Set();

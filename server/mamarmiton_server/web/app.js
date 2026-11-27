@@ -12,11 +12,14 @@ import { leaveCookMode } from "./kitchen.js";
 import { clearShopping, renderCourses } from "./courses.js";
 import { renderEditor } from "./editor.js";
 import { openAccountDialog, openReportDialog } from "./account.js";
+import { forgetImportStatus, importStatus, loadImportStatus, openImportDialog } from "./importer.js";
+import { setPendingDraft, takePendingDraft } from "./importlogic.js";
 
 const root = document.getElementById("root");
 let view = null;       // {update()} of the screen showing
 let main = null;
 let topbar = null;
+let importBtn = null;
 let timer = null;
 let lastSync = 0;
 let loggedIn = false;
@@ -25,7 +28,26 @@ initTheme();
 
 // ------------------------------------------------------------------ session
 let offline = false;
-const paintOffline = () => setOffline(offline, pendingCount);
+// "Importer" needs a connection (the server reads the recipe) and a server recent enough to do it
+const canImport = () => !offline && !!importStatus();
+const paintImport = () => { if (importBtn) importBtn.hidden = !canImport(); };
+const paintOffline = () => { setOffline(offline, pendingCount); paintImport(); };
+function checkImport() {
+  const before = importStatus();
+  void loadImportStatus().then((now) => {
+    if (!loggedIn) return;
+    paintImport();
+    if (now !== before && view && view.kind === "home") view.update();  // the empty book offers it too
+  });
+}
+function openImport() {
+  openImportDialog({
+    onDone: (draft) => {
+      setPendingDraft(draft);
+      if (location.hash === "#/nouvelle") route(); else location.hash = "#/nouvelle";
+    },
+  });
+}
 function setOnline(ok) {
   const wasOffline = offline;
   offline = !ok;
@@ -53,6 +75,8 @@ function showLogin(message = "") {
   clearInterval(timer);
   token.clear();
   resetState();
+  forgetImportStatus();
+  setPendingDraft(null);
   paintOffline();  // the pending-edits badge belongs to the user who just left
   leaveCookMode();
   view = null;
@@ -81,6 +105,7 @@ async function start(user) {
   if (!loggedIn) return;
   if (cached) route();
   paintOffline();
+  checkImport();  // in parallel with the sync below
   try {
     state.users = await api.users();
   } catch { /* shared lists simply stay empty until the next refresh */ }
@@ -111,6 +136,8 @@ function buildShell() {
       h("img", { src: "/app/icon.svg", alt: "", width: 36, height: 36 }), h("span", { class: "serif", text: "Mamarmiton" })),
     h("div", { class: "topbar-actions" },
       h("a", { class: "btn btn-accent", href: "#/nouvelle", "aria-label": "Nouvelle recette" }, icon("plus", 20), h("span", { class: "btn-label", text: "Nouvelle recette" })),
+      importBtn = h("button", { class: "btn btn-topbar", type: "button", hidden: !canImport(), "aria-label": "Importer une recette",
+        title: "Importer une recette (photo, fichier ou texte)", onClick: openImport }, icon("scan", 22), h("span", { class: "btn-label", text: "Importer" })),
       h("a", { class: "btn btn-topbar", href: "#/courses", "aria-label": "Courses" }, icon("cart", 22), h("span", { class: "btn-label", text: "Courses" })),
       themeBtn,
       h("button", { class: "btn btn-topbar", type: "button", "aria-label": "Mon compte", onClick: () => openAccountDialog({ onSignOut: signOut }) },
@@ -141,13 +168,14 @@ function route() {
     view = renderCourses(main);
     view.kind = "courses";
   } else if (kind === "nouvelle") {
-    view = renderEditor(main, null, { done: (rid) => { location.hash = `#/r/${rid}`; }, cancel: () => { location.hash = "#/"; } });
+    view = renderEditor(main, null, { done: (rid) => { location.hash = `#/r/${rid}`; }, cancel: () => { location.hash = "#/"; },
+      draft: takePendingDraft() });
     view.kind = "editor";
   } else if (kind === "modifier" && id) {
     view = renderEditor(main, id, { done: (rid) => { location.hash = `#/r/${rid}`; }, cancel: () => { location.hash = `#/r/${id}`; } });
     view.kind = "editor";
   } else {
-    view = renderHome(main, { onNew: () => { location.hash = "#/nouvelle"; } });
+    view = renderHome(main, { onNew: () => { location.hash = "#/nouvelle"; }, onImport: openImport, canImport });
     view.kind = "home";
   }
   if (view.kind !== "editor") main.focus({ preventScroll: true });
@@ -162,6 +190,7 @@ async function refresh() {
     const changed = await sync();
     afterChange(changed);
     sendUsage();
+    checkImport();  // asked again only while the last try had no connection
   } catch { /* offline or session ended: the banner / login screen already say so */ }
 }
 

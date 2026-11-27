@@ -38,6 +38,8 @@ def test_page_has_no_inline_script_or_style(client):
 @pytest.mark.parametrize("path,content_type", [
     ("/app/app.js", "text/javascript"),
     ("/app/quantities.js", "text/javascript"),
+    ("/app/importer.js", "text/javascript"),
+    ("/app/importlogic.js", "text/javascript"),
     ("/app/style.css", "text/css"),
     ("/app/manifest.webmanifest", "application/manifest+json"),
     ("/app/icon.svg", "image/svg+xml"),

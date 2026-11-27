@@ -66,30 +66,35 @@ function askConflict(mine, current) {
   });
 }
 
-/** Create (id = null) or edit a recipe. `done(id)` navigates away. */
-export function renderEditor(main, id, { done, cancel }) {
+/**
+ * Create (id = null) or edit a recipe. `done(id)` navigates away.
+ * `draft` (new recipes only) prefills the form: {recipe, warnings, dishPhoto} from importlogic.draftFromImport.
+ */
+export function renderEditor(main, id, { done, cancel, draft = null }) {
   const existing = id ? getRecipe(id) : null;
   if (id && (!existing || !canEdit(existing))) { cancel(); return { update() {} }; }
+  if (id) draft = null;
   const entry = id ? state.entries.get(id) : null;
-  const base = entry ? structuredClone(entry.recipe) : {};
+  const base = entry ? structuredClone(entry.recipe) : draft && draft.recipe.source ? { source: draft.recipe.source } : {};
+  const init = existing || (draft ? draft.recipe : null);  // what the fields start with
   const recipeId = id || newId();
   document.title = `${id ? "Modifier" : "Nouvelle recette"} · Mamarmiton`;
 
   const error = h("p", { class: "form-error", role: "alert" });
-  const nom = h("input", { type: "text", maxlength: 200, value: existing?.nom ?? "", placeholder: "ex. Gâteau au chocolat de mamie", autocomplete: "off", enterkeyhint: "next" });
-  const dish = select(DISH_TYPES, existing?.type_plat ?? "Plat");
-  const cooking = select(COOKING_TYPES, existing?.type_cuisson ?? "Sans cuisson");
-  const prep = h("input", { type: "text", inputmode: "numeric", value: existing?.temps ? String(existing.temps) : "", placeholder: "ex. 20" });
-  const cook = h("input", { type: "text", inputmode: "numeric", value: existing?.temps_cuisson ? String(existing.temps_cuisson) : "", placeholder: "ex. 45" });
-  const pour = h("input", { type: "number", min: 1, max: 99, inputmode: "numeric", value: String(existing?.pour ?? 4) });
+  const nom = h("input", { type: "text", maxlength: 200, value: init?.nom ?? "", placeholder: "ex. Gâteau au chocolat de mamie", autocomplete: "off", enterkeyhint: "next" });
+  const dish = select(DISH_TYPES, init?.type_plat ?? "Plat");
+  const cooking = select(COOKING_TYPES, init?.type_cuisson ?? "Sans cuisson");
+  const prep = h("input", { type: "text", inputmode: "numeric", value: init?.temps ? String(init.temps) : "", placeholder: "ex. 20" });
+  const cook = h("input", { type: "text", inputmode: "numeric", value: init?.temps_cuisson ? String(init.temps_cuisson) : "", placeholder: "ex. 45" });
+  const pour = h("input", { type: "number", min: 1, max: 99, inputmode: "numeric", value: String(init?.pour ?? 4) });
   const fav = h("input", { type: "checkbox", checked: existing?.favori ?? false });
   const steps = h("textarea", { rows: 8, placeholder: "Une étape par ligne" });
-  steps.value = (existing?.etapes ?? []).join("\n");
+  steps.value = (init?.etapes ?? []).join("\n");
   const notes = h("textarea", { rows: 4, maxlength: 20000, placeholder: "Un conseil, une variante, un souvenir…" });
-  notes.value = existing?.notes ?? "";
+  notes.value = init?.notes ?? "";
 
   // ---- tags: type + Enter or comma adds a chip
-  let tags = normalizeTags(existing?.tags);
+  let tags = normalizeTags(init?.tags);
   const tagInput = h("input", { type: "text", maxlength: MAX_TAG_LEN * 3, placeholder: "ex. Noël", autocomplete: "off",
     enterkeyhint: "done", "aria-label": "Ajouter une étiquette" });
   const tagChips = h("div", { class: "chip-wrap" });
@@ -150,7 +155,7 @@ export function renderEditor(main, id, { done, cancel }) {
     if (focus) name.focus();
   }
   const addBtn = h("button", { class: "btn btn-secondary", type: "button", onClick: () => addRow(null, true) }, icon("plus", 18), "Ajouter un ingrédient");
-  for (const ing of existing?.ingredients ?? []) addRow(ing);
+  for (const ing of init?.ingredients ?? []) addRow(ing);
   if (!rows.length) addRow(null);
 
   // ---- photos
@@ -185,6 +190,8 @@ export function renderEditor(main, id, { done, cancel }) {
     return input;
   };
   const cameraInput = pick(true), libraryInput = pick(false);
+  // the photo of the dish found in an imported page: sent with the recipe when it is saved
+  if (draft && draft.dishPhoto) pending.push({ file: draft.dishPhoto, url: URL.createObjectURL(draft.dishPhoto) });
   drawPhotos();
 
   // ---- collect / save
@@ -214,7 +221,7 @@ export function renderEditor(main, id, { done, cancel }) {
     };
   }
   const snapshot = () => JSON.stringify([{ ...collect(), modifie_le: "", cree_le: "" }, fav.checked, pending.length, [...removedImages]]);
-  const initial = snapshot();
+  const initial = draft ? "" : snapshot();  // an imported recipe is never thrown away without asking
 
   const saveLabel = h("span", { text: "Enregistrer" });
   const saveBtn = h("button", { class: "btn btn-primary btn-big", type: "submit" }, icon("check", 20), saveLabel);
@@ -285,7 +292,8 @@ export function renderEditor(main, id, { done, cancel }) {
 
   async function leave() {
     if (snapshot() !== initial) {
-      const ok = await confirmDialog({ title: "Abandonner les changements ?", message: "Ce que vous avez écrit ne sera pas enregistré.",
+      const ok = await confirmDialog({ title: draft ? "Abandonner la recette importée ?" : "Abandonner les changements ?",
+        message: draft ? "La recette lue ne sera pas enregistrée." : "Ce que vous avez écrit ne sera pas enregistré.",
         confirmText: "Abandonner", cancelText: "Continuer à modifier", danger: true });
       if (!ok) return;
     }
@@ -293,10 +301,18 @@ export function renderEditor(main, id, { done, cancel }) {
     cancel();
   }
 
+  const notice = draft ? h("div", { class: "import-notice", role: "status", tabindex: "-1" },
+    icon("scan", 24),
+    h("div", { class: "import-notice-text" },
+      h("p", { class: "import-notice-title", text: "Recette lue automatiquement : vérifiez les quantités et les étapes avant d'enregistrer." }),
+      draft.warnings.length ? h("ul", {}, draft.warnings.map((w) => h("li", { text: w }))) : null,
+      draft.dishPhoto ? h("p", { text: "La photo du plat a été ajoutée en bas, dans « Photos »." }) : null)) : null;
+
   const form = h("form", { class: "editor stack", novalidate: true, onSubmit: save },
     h("header", { class: "editor-head" },
-      h("h1", { class: "serif", text: id ? "Modifier la recette" : "Nouvelle recette" }),
+      h("h1", { class: "serif", text: id ? "Modifier la recette" : draft ? "Recette importée" : "Nouvelle recette" }),
       h("p", { class: "muted", text: "Seul le nom est obligatoire. Le reste peut être complété plus tard." })),
+    notice,
     h("section", { class: "card pad stack" },
       field("Nom de la recette *", nom, { id: "e-nom" }),
       h("div", { class: "grid-2" }, field("Type de plat", dish), field("Mode de cuisson", cooking)),
@@ -330,6 +346,6 @@ export function renderEditor(main, id, { done, cancel }) {
       h("div", { class: "save-bar-buttons" },
         h("button", { class: "btn btn-secondary btn-big", type: "button", onClick: leave, text: "Annuler" }), saveBtn)));
   clear(main).append(h("div", { class: "container narrow" }, form));
-  nom.focus();
+  if (notice) notice.focus(); else nom.focus();  // on a phone the keyboard would hide the notice
   return { update() {} };
 }
